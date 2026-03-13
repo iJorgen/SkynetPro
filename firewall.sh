@@ -55,9 +55,10 @@ loginvalid="disabled"	# enabled | disabled
 
 blocklist_set="     <BitWire>   https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt  {5}
                     <HaGeZi>    https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt  {5}"
-blocklist_ip=""
+blocklist_ip="      45.135.180.38
+                    45.135.180.177
+                    212.104.141.140"
 blocklist_domain=""
-
 passlist_ip="       45.90.28.0
                     45.90.30.0
                     188.172.192.71
