@@ -316,12 +316,6 @@ update_Counter() {
 }
 
 
-# rand() {
-# 	local min=$1 max=$2
-# 	echo -n $((min + $(printf '%d' 0x$(openssl rand -hex 2)) * (max - min + 1) / 65025))
-# }
-
-
 header() {
 	if [ "$option" = "cru" ]; then return; fi
 	printf '\033[?7l' # disable line wrap
