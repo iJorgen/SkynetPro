@@ -698,16 +698,32 @@ mkdir -p "$dir_cache" "$dir_debug" "$dir_etag" "$dir_filtered"
 mkdir -p "$dir_reload" "$dir_system" "$dir_temp" "$dir_update"
 
 
-exec 99>"$lockfile"
-if ! flock -n 99; then
-	if [ "$command" = "update" ] && [ "$option" = "cru" ]; then
-		log_Skynet "[!] Skynet Lite is locked, next update scheduled"
-		exit 1;
+# OPT: Read-only-kommandon behöver inget lås — de modifierar inga ipsets/filer.
+# Detta gör att 'firewall top', 'firewall log' etc. fungerar omedelbart
+# även medan en update pågår i bakgrunden.
+needs_lock=1
+case "$command" in
+	top|ip|domain|entries|fresh|frequency|log|warning|error|help|"")
+		needs_lock=0
+		;;
+esac
+
+# Domain/IP-uppslag är också read-only
+if echo "$command" | is_Domain >/dev/null 2>&1; then needs_lock=0; fi
+if echo "$command" | is_IP     >/dev/null 2>&1; then needs_lock=0; fi
+
+if [ "$needs_lock" -eq 1 ]; then
+	exec 99>"$lockfile"
+	if ! flock -n 99; then
+		if [ "$command" = "update" ] && [ "$option" = "cru" ]; then
+			log_Skynet "[!] Skynet Lite is locked, next update scheduled"
+			exit 1
+		fi
+		printf '\n\033[1A' # newline and cursor up
+		printf '[i] Skynet Lite is locked, retry command every 5 seconds...'
+		sleep 5
+		exec "$0" "$command" "$option"   # ← bevarar $option (bugfix)
 	fi
-	printf '\n\033[1A' # newline and cursor up
-	printf '[i] Skynet Lite is locked, retry command every 5 seconds...'
-	sleep 5
-	exec "$0" "$command"
 fi
 
 
@@ -1015,5 +1031,10 @@ case "$command" in
 esac
 
 
-rm -f "$dir_temp/"*
+# OPT: Städa bara temp-filer för skrivande kommandon.
+# Read-only-kommandon kan köra parallellt med update och deras
+# temp-filer ska inte raderas mitt i operationen.
+if [ "$needs_lock" -eq 1 ]; then
+	rm -f "$dir_temp/"*
+fi
 log_Tail "$dir_skynet/update.log"
