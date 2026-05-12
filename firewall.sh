@@ -499,11 +499,9 @@ download_Set() {
 		setname="Skynet-$(echo -n "$url" | md5sum | cut -c1-24)"
 		echo "$setname,$comment" >> "$dir_temp/lookup.csv"
 
-		# OPT: Skapa setet temporärt utan att lägga till i Master.
-		# Setet förstörs av load_Ultimate efter merge — diff-cachen i
-		# $dir_filtered/ är källan för nästa compare_Set, inte ipset.
 		if ! ipset -n list "$setname" >/dev/null 2>&1; then
 			ipset create "$setname" hash:net maxelem 524288 comment
+			ipset add Skynet-Master "$setname" comment "$comment"
 		fi
 		if [ -f "$dir_reload/$setname" ]; then
 			if [ $(head -1 "$dir_reload/$setname" 2>/dev/null) -ge 27 ]; then
@@ -595,82 +593,6 @@ download_Set() {
 }
 
 
-load_Ultimate() {
-	# OPT: Slår ihop alla blocklist-filer till ett enda optimerat set.
-	# Numerisk IP-sortering, deduplicerad, CIDR-överlapp behålls (sort -u räcker).
-	local merged="$dir_temp/ultimate_merged"
-	local sorted="$dir_temp/ultimate_sorted"
-	local found=0
-
-	# Samla in alla filtered-filer som tillhör aktiva blocklistor
-	: > "$merged"
-	for setname in $(filter_Skynet_Set < "$dir_system/lookup.csv" | awk -F, '{print $1}'); do
-		if [ -s "$dir_filtered/$setname" ]; then
-			cat "$dir_filtered/$setname" >> "$merged"
-			found=1
-		fi
-	done
-
-	# Lägg även till manuella blocklist_ip
-	printf '%s\n' "$blocklist_ip" | filter_IP_CIDR | filter_Out_PrivateIP >> "$merged"
-
-	if [ "$found" -eq 0 ] && [ ! -s "$merged" ]; then
-		log_Skynet "[!] Ultimate: inga entries att ladda"
-		return
-	fi
-
-	# Numerisk IP-sortering (CIDR-suffix bryr vi oss inte om för ordningen).
-	# IP först, /maskbit som tiebreaker.
-	sort -t. -k1,1n -k2,2n -k3,3n -k4,4n -u "$merged" > "$sorted"
-
-	local count
-	count=$(wc -l < "$sorted")
-	log_Skynet "[i] Update Skynet-Ultimate ($count entries)"
-
-	# Bygg setet via Skynet-Temp och swap (atomär växling)
-	ipset -q destroy "Skynet-Temp"
-	ipset create Skynet-Temp hash:net hashsize 524288 maxelem 1048576 counters comment
-
-	awk '{printf "add Skynet-Temp %s comment \"Ultimate: %s\"\n", $1, $1}' "$sorted" \
-		| ipset restore -!
-
-	# Säkerställ att Skynet-Ultimate finns i Master innan swap
-	if ! ipset -q list Skynet-Ultimate >/dev/null 2>&1; then
-		ipset create Skynet-Ultimate hash:net hashsize 524288 maxelem 1048576 counters comment
-		ipset -q add Skynet-Master Skynet-Ultimate comment "ultimate"
-	fi
-
-	ipset swap Skynet-Ultimate Skynet-Temp
-	ipset destroy Skynet-Temp
-
-	# Spara sorterad textfil för inspektion
-	mv -f "$sorted" "$dir_filtered/Skynet-Ultimate"
-	rm -f "$merged"
-
-	# Ta bort de individuella blocklist-seten från Skynet-Master
-	# (de behålls som ipsets för debug men matchas inte längre)
-	for setname in $(ipset list Skynet-Master | filter_Skynet_Set | awk '{print $1}'); do
-		if [ "$setname" != "Skynet-Ultimate" ]; then
-			ipset -q del Skynet-Master "$setname"
-		fi
-	done
-
-	# OPT: Cleanup — säkerställ att gamla Master-entries är borttagna
-	# (skydd vid uppgradering från version där Blocklist/Domain låg i Master)
-	for orphan in Skynet-Blocklist Skynet-Domain; do
-		ipset -q del Skynet-Master "$orphan" 2>/dev/null
-	done
-
-	# OPT: Frigör kernel-minne genom att förstöra individuella blocklist-ipsets.
-	# Deras data finns kvar i $dir_filtered/ för nästa diff/update.
-	for setname in $(ipset list -n | filter_Skynet_Set); do
-		if [ "$setname" != "Skynet-Ultimate" ]; then
-			ipset -q destroy "$setname" 2>/dev/null
-		fi
-	done
-}
-
-
 ############################
 #- Initialize Skynet Lite -#
 ############################
@@ -698,32 +620,16 @@ mkdir -p "$dir_cache" "$dir_debug" "$dir_etag" "$dir_filtered"
 mkdir -p "$dir_reload" "$dir_system" "$dir_temp" "$dir_update"
 
 
-# OPT: Read-only-kommandon behöver inget lås — de modifierar inga ipsets/filer.
-# Detta gör att 'firewall top', 'firewall log' etc. fungerar omedelbart
-# även medan en update pågår i bakgrunden.
-needs_lock=1
-case "$command" in
-	top|ip|domain|entries|fresh|frequency|log|warning|error|help|"")
-		needs_lock=0
-		;;
-esac
-
-# Domain/IP-uppslag är också read-only
-if echo "$command" | is_Domain >/dev/null 2>&1; then needs_lock=0; fi
-if echo "$command" | is_IP     >/dev/null 2>&1; then needs_lock=0; fi
-
-if [ "$needs_lock" -eq 1 ]; then
-	exec 99>"$lockfile"
-	if ! flock -n 99; then
-		if [ "$command" = "update" ] && [ "$option" = "cru" ]; then
-			log_Skynet "[!] Skynet Lite is locked, next update scheduled"
-			exit 1
-		fi
-		printf '\n\033[1A' # newline and cursor up
-		printf '[i] Skynet Lite is locked, retry command every 5 seconds...'
-		sleep 5
-		exec "$0" "$command" "$option"   # ← bevarar $option (bugfix)
+exec 99>"$lockfile"
+if ! flock -n 99; then
+	if [ "$command" = "update" ] && [ "$option" = "cru" ]; then
+		log_Skynet "[!] Skynet Lite is locked, next update scheduled"
+		exit 1;
 	fi
+	printf '\n\033[1A' # newline and cursor up
+	printf '[i] Skynet Lite is locked, retry command every 5 seconds...'
+	sleep 5
+	exec "$0" "$command"
 fi
 
 
@@ -804,8 +710,8 @@ case "$command" in
 			create Skynet-Master list:set size 64 comment counters
 			create Skynet-Blocklist hash:net comment
 			create Skynet-Domain hash:net comment
-			create Skynet-Ultimate hash:net hashsize 524288 maxelem 1048576 counters comment
-			add Skynet-Master Skynet-Ultimate comment "ultimate"' | tr -d '\t' | ipset restore -!
+			add Skynet-Master Skynet-Blocklist comment "blocklist_ip"
+			add Skynet-Master Skynet-Domain comment "blocklist_domain"' | tr -d '\t' | ipset restore -!
 		load_IPTables
 		load_LogIPTables
 		lookup_Comment_Init
@@ -813,7 +719,6 @@ case "$command" in
 		load_Blocklist
 		load_Domain
 		download_Set
-		load_Ultimate
 		cru d Skynet_update; minutes=$(( ($(date +%M) + 14) % 15))
 		cru a Skynet_update "12,27,42,57 * * * * nice -n 19 /jffs/scripts/firewall update cru"
 		update_Counter "$dir_system/updatecount" >/dev/null
@@ -828,7 +733,6 @@ case "$command" in
 		load_Blocklist
 		load_Domain
 		download_Set
-		load_Ultimate
 		footer
 	;;
 
@@ -952,52 +856,6 @@ case "$command" in
 		footer
 	;;
 
-	top)
-		header "Top 25 blocked IPs" "Packets"
-
-		if ! ipset list Skynet-Ultimate >/dev/null 2>&1; then
-			echo " [!] Skynet-Ultimate finns inte — kör 'firewall reset' först"
-			footer
-			exit 1
-		fi
-
-		# ipset list-format för entry med counters:
-		#   1.2.3.4 packets 42 bytes 3500 comment "Ultimate: 1.2.3.4"
-		ipset list Skynet-Ultimate | \
-			awk '/^[0-9]+\./ {
-				ip = $1
-				pkts = 0
-				bts = 0
-				for (i = 1; i <= NF; i++) {
-					if ($i == "packets") pkts = $(i+1)
-					if ($i == "bytes")   bts  = $(i+1)
-				}
-				if (pkts > 0) printf "%d;%d;%s\n", pkts, bts, ip
-			}' | \
-			sort -t';' -k1,1nr | \
-			head -25 > "$dir_temp/top.ssv"
-
-		if [ ! -s "$dir_temp/top.ssv" ]; then
-			echo " [i] Inga blockerade paket sedan senaste update"
-			footer
-			exit 0
-		fi
-
-		# Formatera output med tusentalsavgränsare
-		awk -F';' '{
-			# Tusentalsavgränsare för paket
-			p = $1
-			pf = ""
-			while (length(p) > 3) {
-				pf = "," substr(p, length(p)-2) pf
-				p = substr(p, 1, length(p)-3)
-			}
-			pf = p pf
-			printf " %-40s  %15s\n", $3, pf
-		}' "$dir_temp/top.ssv"
-		footer
-	;;
-
 
 	help)
 		header "Commands"
@@ -1007,7 +865,6 @@ case "$command" in
 		echo " firewall fresh"
 		echo " firewall frequency"
 		echo " firewall entries"
-		echo " firewall top"
 		echo " firewall log"
 		echo " firewall warning"
 		echo " firewall error"
@@ -1031,10 +888,5 @@ case "$command" in
 esac
 
 
-# OPT: Städa bara temp-filer för skrivande kommandon.
-# Read-only-kommandon kan köra parallellt med update och deras
-# temp-filer ska inte raderas mitt i operationen.
-if [ "$needs_lock" -eq 1 ]; then
-	rm -f "$dir_temp/"*
-fi
+rm -f "$dir_temp/"*
 log_Tail "$dir_skynet/update.log"
