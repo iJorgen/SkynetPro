@@ -53,8 +53,8 @@ filtertraffic="all"		# inbound | outbound | all
 logmode="enabled"		# enabled | disabled
 loginvalid="disabled"	# enabled | disabled
 
-blocklist_set="     <HaGeZi>    https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt  {5}
-                    <BitWire>   https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt  {5}"
+blocklist_set="     <HaGeZi>    https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt  {16}
+                    <BitWire>   https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt  {4}"
 blocklist_ip="      45.135.180.38
                     45.135.180.177
                     212.104.141.140"
