@@ -499,9 +499,11 @@ download_Set() {
 		setname="Skynet-$(echo -n "$url" | md5sum | cut -c1-24)"
 		echo "$setname,$comment" >> "$dir_temp/lookup.csv"
 
+		# OPT: Skapa setet temporärt utan att lägga till i Master.
+		# Setet förstörs av load_Ultimate efter merge — diff-cachen i
+		# $dir_filtered/ är källan för nästa compare_Set, inte ipset.
 		if ! ipset -n list "$setname" >/dev/null 2>&1; then
 			ipset create "$setname" hash:net maxelem 524288 comment
-			ipset add Skynet-Master "$setname" comment "$comment"
 		fi
 		if [ -f "$dir_reload/$setname" ]; then
 			if [ $(head -1 "$dir_reload/$setname" 2>/dev/null) -ge 27 ]; then
@@ -657,6 +659,14 @@ load_Ultimate() {
 	# (skydd vid uppgradering från version där Blocklist/Domain låg i Master)
 	for orphan in Skynet-Blocklist Skynet-Domain; do
 		ipset -q del Skynet-Master "$orphan" 2>/dev/null
+	done
+
+	# OPT: Frigör kernel-minne genom att förstöra individuella blocklist-ipsets.
+	# Deras data finns kvar i $dir_filtered/ för nästa diff/update.
+	for setname in $(ipset list -n | filter_Skynet_Set); do
+		if [ "$setname" != "Skynet-Ultimate" ]; then
+			ipset -q destroy "$setname" 2>/dev/null
+		fi
 	done
 }
 
