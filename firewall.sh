@@ -484,6 +484,8 @@ compare_Set() {
 		mv -f "$swap_file" "$filtered_temp"
 	fi
 
+	printf '\033[1A\033[K'
+
 	local dedup_existing="$dir_temp/dedup_existing"
 	local dedup_result="$dir_temp/dedup_result"
 	: > "$dedup_existing"
@@ -510,7 +512,6 @@ compare_Set() {
 	rm -f "$dedup_existing"
 
 	diff "$filtered_cache" "$filtered_temp" | grep -E '^[+-][1-9]' > "$dir_temp/diff"
-	printf '\033[1A\033[K' # cursor up and clear
 	if [ -s "$dir_temp/diff" ]; then return 1; fi
 	return 0
 }
