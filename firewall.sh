@@ -53,8 +53,8 @@ filtertraffic="all"		# inbound | outbound | all
 logmode="enabled"		# enabled | disabled
 loginvalid="disabled"	# enabled | disabled
 
-blocklist_set="     <BitWire>   https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt  {5}
-                    <HaGeZi>    https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt  {5}"
+blocklist_set="     <HaGeZi>    https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt  {5}
+                    <BitWire>   https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt  {5}"
 blocklist_ip="      45.135.180.38
                     45.135.180.177
                     212.104.141.140"
@@ -475,12 +475,50 @@ compare_Set() {
 	if [ ! -f "$filtered_cache" ]; then
 		touch "$filtered_cache"
 	fi
-	{ unzip -p "$temp" 2>/dev/null || gunzip -c "$temp" 2>/dev/null || cat "$temp"; } | filter_set_IP_CIDR | filter_Out_PrivateIP | sort -u > "$filtered_temp"
+	# OPT: LC_ALL=C för konsistent byte-sortering — krävs för comm -23 senare
+	{ unzip -p "$temp" 2>/dev/null || gunzip -c "$temp" 2>/dev/null || cat "$temp"; } \
+		| filter_set_IP_CIDR | filter_Out_PrivateIP | LC_ALL=C sort -u > "$filtered_temp"
+
 	if [ "$url" = 'https://feeds.dshield.org/block.txt' ]; then
 		local swap_file="$dir_temp/swap_file"
-		awk '{print $0"/24"}' "$filtered_temp" > "$swap_file"
+		awk '{print $0"/24"}' "$filtered_temp" | LC_ALL=C sort -u > "$swap_file"
 		mv -f "$swap_file" "$filtered_temp"
 	fi
+
+	# OPT: Cross-list deduplicering. Filtrerar bort entries som redan finns
+	# i tidigare processade blocklist-set ($dir_filtered/Skynet-<hash>).
+	# Den första listan i blocklist_set är "primär" och behåller alla entries.
+	# Efterföljande listor (t.ex. BitWire) får bort sina dubbletter mot
+	# tidigare listor (t.ex. HaGeZi).
+	local dedup_existing="$dir_temp/dedup_existing"
+	local dedup_sorted="$dir_temp/dedup_sorted"
+	local dedup_result="$dir_temp/dedup_result"
+	: > "$dedup_existing"
+
+	# Samla data från alla redan färdigprocessade listor (utom oss själva)
+	local existing
+	for existing in "$dir_filtered"/Skynet-*; do
+		# Guard mot tom glob och egen filtered_cache
+		[ -f "$existing" ] || continue
+		[ "$existing" = "$filtered_cache" ] && continue
+		cat "$existing" >> "$dedup_existing"
+	done
+
+	if [ -s "$dedup_existing" ]; then
+		local before after removed
+		before=$(wc -l < "$filtered_temp")
+		LC_ALL=C sort -u "$dedup_existing" > "$dedup_sorted"
+		# comm -23: rader som finns i filtered_temp men INTE i dedup_sorted
+		LC_ALL=C comm -23 "$filtered_temp" "$dedup_sorted" > "$dedup_result"
+		mv -f "$dedup_result" "$filtered_temp"
+		after=$(wc -l < "$filtered_temp")
+		removed=$((before - after))
+		if [ "$removed" -gt 0 ]; then
+			log_Skynet "[i] Dedup $comment: $removed dubbletter borttagna ($before → $after)"
+		fi
+	fi
+	rm -f "$dedup_existing" "$dedup_sorted"
+
 	diff "$filtered_cache" "$filtered_temp" | grep -E '^[+-][1-9]' > "$dir_temp/diff"
 	printf '\033[1A\033[K' # cursor up and clear
 	if [ -s "$dir_temp/diff" ]; then return 1; fi
