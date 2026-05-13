@@ -6,6 +6,7 @@ Skynet Lite relies on the IPTables from Skynet by Adamm.
 ## Key features
 - Small one file shell script, no need for an external USB drive.
 - Additional Threat Intelligence Sources added.
+- Deduplication of entries to optimize ipset sizes and resource usage.
 - Support for plain text gzip transfer-encoding.
 - Only download and update changed blocklist sets.
 - Use incremental update for all blocklist sets.
