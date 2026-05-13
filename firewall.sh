@@ -3,7 +3,7 @@
 # / __| |___  _ _ _  ___| |_  | |  (_) |_ ___
 # \__ \ / / || | ' \/ -_)  _| | |__| |  _/ -_)
 # |___/_\_\\_, |_||_\___|\__| |____|_|\__\___|   ForkKnox-edition
-#          |__/                                  Build 2026-05-13 14:43
+#          |__/                                  Build 2026-05-13 14:46
 #
 #   Skynet Lite by Willem Bartels
 #   IP Blocking for ASUS Routers Using IPSet
@@ -519,7 +519,7 @@ compare_Set() {
 		after=$(wc -l < "$filtered_temp")
 		removed=$((before - after))
 		if [ "$removed" -gt 0 ]; then
-			log_Skynet "[i] Dedup $comment: $removed dubbletter borttagna ($before → $after)"
+			log_Skynet "[i] Dedup $comment: $removed duplicates removed ($before → $after)"
 		fi
 	fi
 	rm -f "$dedup_existing"
