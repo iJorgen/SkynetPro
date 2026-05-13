@@ -58,7 +58,7 @@ blocklist_set="     <HaGeZi>     https://raw.githubusercontent.com/hagezi/dns-bl
                     <IPsum>      https://raw.githubusercontent.com/stamparm/ipsum/refs/heads/master/levels/2.txt  {24}
                     <Abuse>      https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-1d.ipv4  {24}
                     <Tor>        https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/dm_tor.ipset  {4}
-                    <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/out
+                    <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt  {4}"
 blocklist_ip="      45.135.180.38
                     45.135.180.177
                     212.104.141.140"
