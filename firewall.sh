@@ -494,12 +494,21 @@ compare_Set() {
 	local dedup_result="$dir_temp/dedup_result"
 	: > "$dedup_existing"
 
-	local existing
-	for existing in "$dir_filtered"/Skynet-*; do
-		[ -f "$existing" ] || continue
-		[ "$existing" = "$filtered_cache" ] && continue
-		cat "$existing" >> "$dedup_existing"
-	done
+	local primary_url primary_hash primary_setname
+	primary_url=$(echo "$blocklist_set" | filter_URL_Line | head -1 | filter_URL)
+	primary_hash=$(echo -n "$primary_url" | md5sum | cut -c1-24)
+	primary_setname="Skynet-$primary_hash"
+
+	if [ "$setname" = "$primary_setname" ]; then
+		rm -f "$dedup_existing"
+	else
+		local existing
+		for existing in "$dir_filtered"/Skynet-*; do
+			[ -f "$existing" ] || continue
+			[ "$existing" = "$filtered_cache" ] && continue
+			cat "$existing" >> "$dedup_existing"
+		done
+	fi
 
 	if [ -s "$dedup_existing" ]; then
 		local before after removed
