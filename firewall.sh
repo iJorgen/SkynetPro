@@ -3,7 +3,7 @@
 # / __| |___  _ _ _  ___| |_  | |  (_) |_ ___
 # \__ \ / / || | ' \/ -_)  _| | |__| |  _/ -_)
 # |___/_\_\\_, |_||_\___|\__| |____|_|\__\___|   ForkKnox-edition
-#          |__/
+#          |__/                                  v2026-05-13 14:40
 #
 #   Skynet Lite by Willem Bartels
 #   IP Blocking for ASUS Routers Using IPSet
