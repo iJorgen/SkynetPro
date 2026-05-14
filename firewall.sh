@@ -3,7 +3,7 @@
 # / __| |___  _ _ _  ___| |_  | |  (_) |_ ___
 # \__ \ / / || | ' \/ -_)  _| | |__| |  _/ -_)
 # |___/_\_\\_, |_||_\___|\__| |____|_|\__\___|   ForkKnox-edition
-#          |__/                                  Build 2026-05-14 08:40
+#          |__/                                  build 2026-05-14 09:40
 #
 #   Skynet Lite by Willem Bartels
 #   IP Blocking for ASUS Routers Using IPSet
@@ -534,7 +534,7 @@ compare_Set() {
 
 
 download_Set() {
-	local cache= comment= curl_exit= dir= etag= etag_temp= filtered_cache= filtered_temp= line= list= lookup= setname= response_code= temp= update_cycles= url=
+	local cache= comment= curl_exit= dir= etag= etag_temp= filtered_cache= filtered_temp= hashsize= line= list= lookup= setname= response_code= temp= update_cycles= url=
 	echo "$blocklist_set" | filter_URL_Line > "$dir_temp/blocklist_set"
 
 	while IFS= read -r line; do
@@ -545,7 +545,14 @@ download_Set() {
 		echo "$setname,$comment" >> "$dir_temp/lookup.csv"
 
 		if ! ipset -n list "$setname" >/dev/null 2>&1; then
-			ipset create "$setname" hash:net maxelem 524288 comment
+			case "$url" in
+				*bitwire*)   hashsize=262144 ;;
+				*hagezi*)    hashsize=131072  ;;
+				*abuseipdb*) hashsize=65536  ;;
+				*ipsum*)     hashsize=32768  ;;
+				*)           hashsize=16384   ;;
+			esac
+			ipset create "$setname" hash:net hashsize "$hashsize" maxelem 524288 comment
 			ipset add Skynet-Master "$setname" comment "$comment"
 		fi
 		if [ -f "$dir_reload/$setname" ]; then
