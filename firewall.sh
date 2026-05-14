@@ -244,9 +244,12 @@ download_Error() {
 
 
 log_Skynet() {
-	logger -t skynet "$1"
-	echo " $1" >&2
-	echo "$(date '+%b %d %T') $1" >> "$dir_skynet/update.log"
+	local msg="$1"
+	local timestamp
+	timestamp="$(date '+%b %d %T')"
+	echo "$timestamp skynet: $msg" >> /jffs/syslog.log
+	echo " $msg" >&2
+	echo "$timestamp $msg" >> "$dir_skynet/update.log"
 }
 
 
