@@ -1,11 +1,11 @@
 #!/bin/sh
-#  ___ _                 _     ___          
-# / __| |___  _ _ _  ___| |_  | _ \ _ _ ___
-# \__ \ / / || | ' \/ -_)  _| |  _/| '_/ _ \
-# |___/_\_\\_, |_||_\___|\__| |_|  |_| \___/   
-#          |__/       Build 2026-05-15 09:42
+#  ___ _                 _     ___            
+# / __| |___  _ _ _  ___| |_  | _ \ _ _ ___   
+# \__ \ / / || | ' \/ -_)  _| |  _/| '_/ _ \  
+# |___/_\_\\_, |_||_\___|\__| |_|  |_| \___/  
+#          |__/                               
 #
-#   Skynet Pro is optimized by Jörgen Andersson with:
+#   Skynet Pro is enhanced by Jörgen Andersson with:
 #   - Additional blocklists
 #   - Summary Totals in Output Tables
 #   - Optimizations and duplicate Removal Across Blocklists
@@ -308,6 +308,7 @@ header() {
 	if [ "$option" = "cru" ]; then return; fi
 	printf '\033[?7l' # disable line wrap
 	clear; sed -n '2,7s/#//p' "$0"
+	echo " Skynet Pro build $build by Jörgen Andersson"
 	echo " Skynet Lite $version by Willem Bartels"
 	echo " Code is based on Skynet By Adamm"
 	echo
@@ -645,6 +646,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
+build="2026-05-15 10:03"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
