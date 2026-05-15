@@ -26,7 +26,7 @@ Administration > System > Enable JFFS custom scripts and configs: Yes > Apply
 Type the following line in your favorite SSH Client:
 
 ```Shell
-curl https://raw.githubusercontent.com/iJorgen/IPSet_ASUS_Lite/master/firewall.sh --output /jffs/scripts/firewall && chmod 755 /jffs/scripts/firewall && /jffs/scripts/firewall reset
+curl https://raw.githubusercontent.com/iJorgen/SkynetPro/master/firewall.sh --output /jffs/scripts/firewall && chmod 755 /jffs/scripts/firewall && /jffs/scripts/firewall reset
 ```
 
 ## Uninstall
@@ -60,7 +60,3 @@ To make the commands above available from all directories, type the following li
 ```Shell
 echo 'export PATH=$PATH:/jffs/scripts' >> '/jffs/configs/profile.add'
 ```
-
-### Donate to Skynet by Adamm
-
-This script will always be open source and free to use, but if you want to support future development you can do so by [Donating With PayPal.](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=BPN4LTRZKDTML)
