@@ -309,8 +309,8 @@ header() {
 	printf '\033[?7l' # disable line wrap
 	clear; sed -n '2,7s/#//p' "$0"
 	echo " Skynet Pro build $build by Jörgen Andersson"
-	echo " Skynet Lite $version by Willem Bartels"
-	echo " Code is based on Skynet By Adamm"
+	echo " Forked from Skynet Lite $version by Willem Bartels"
+	echo " Original code is based on Skynet By Adamm"
 	echo
 	if [ -n "$1" ]; then
 		printf '%s\n' '-----------------------------------------------------------'
