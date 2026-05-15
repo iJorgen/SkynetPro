@@ -370,9 +370,9 @@ load_Passlist() {
 		add Skynet-Temp 224.0.0.0/3 comment \"Passlist: Multicast/reserved/limited broadcast\""
 	local passlist_domain="$passlist_domain
 		$(echo "$blocklist_set $(nvram get firmware_server) $(nvram get ntp_server0) $(nvram get ntp_server1)" | strip_Domain)
+		cloudflare.com
 		fastly.com
 		github.com
-		cloudflare.com
 		raw.githubusercontent.com
 		www.internic.net"
 
@@ -646,7 +646,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-05-15 10:06"
+build="2026-05-15 19:46"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
