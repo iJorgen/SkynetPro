@@ -1,46 +1,27 @@
 #!/bin/sh
-#  ___ _                 _     _    _ _
-# / __| |___  _ _ _  ___| |_  | |  (_) |_ ___
-# \__ \ / / || | ' \/ -_)  _| | |__| |  _/ -_)
-# |___/_\_\\_, |_||_\___|\__| |____|_|\__\___|   ForkKnox-edition
-#          |__/                                  build 2026-05-14 09:40
+#  ___ _                 _     ___          
+# / __| |___  _ _ _  ___| |_  | _ \ _ _ ___
+# \__ \ / / || | ' \/ -_)  _| |  _/| '_/ _ \
+# |___/_\_\\_, |_||_\___|\__| |_|  |_| \___/   
+#          |__/       Build 2026-05-15 09:42
 #
-#   Skynet Lite by Willem Bartels
+#   Skynet Pro is optimized by Jörgen Andersson with:
+#   - Additional blocklists
+#   - Summary Totals in Output Tables
+#   - Optimizations and duplicate Removal Across Blocklists
+#   - Performance improvements with IPtables scaling
+#   - Improved Filter Functions
+#   - UX & Output Consistency
+#   - Code Quality Improvements
+#
+#   Code is forked from Skynet Lite by Willem Bartels
 #   IP Blocking for ASUS Routers Using IPSet
 #   https://github.com/wbartels/IPSet_ASUS_Lite
 #
-#   Code is based on Skynet by Adamm
+#   Original code is based on Skynet by Adamm
 #   Advanced IP Blocking for ASUS Routers using IPSet
 #   https://github.com/Adamm00/IPSet_ASUS
 #   This script will always be open source and free to use
-#
-#
-# Installation:
-# curl https://raw.githubusercontent.com/iJorgen/IPSet_ASUS_Lite/master/firewall.sh --output /jffs/scripts/firewall && chmod 755 /jffs/scripts/firewall && /jffs/scripts/firewall reset
-#
-# Commands:
-# firewall help
-#
-# Readme:
-# The cron job is started every 15 minutes.
-# By default, the set update process is started after 4 cycles = 1 hour.
-# This value can be overridden per set with the {n} tag.
-# If supported only changed files will be downloaded, see URL's below for more info.
-# This way the update check frequencies can be relative high without overloading the servers.
-#
-# https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/If-Modified-Since
-# https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/If-None-Match
-# https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/304
-#
-# If a download fails, this set will be retried at an interval of 15 minutes.
-# Over time, the interval will be extended to a maximum of 6 hours.
-#
-# Both the <comment> and {n} tags are optional.
-# The order of the URL and tags are not important, but must be on the same line.
-#
-# The other lists (ip and domain) can contain multiple items per list.
-# The items on these lists must be separated with a space, tab or newline.
-# blocklist_ip, blocklist_domain and passlist_ip can optionally use one <comment> tag per list.
 #
 
 
@@ -230,7 +211,7 @@ filter_Skynet() {
 
 
 filter_Skynet_Set() {
-	grep -E '^Skynet-[0-9a-f]{24}'
+    grep -E "^Skynet-" | grep -vE "Skynet-(Passlist|Domain|Master)$"
 }
 
 
