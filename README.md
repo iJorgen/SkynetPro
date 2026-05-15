@@ -1,7 +1,7 @@
-# SkynetPro - Firewall & Security Enhancements
+# Skynet Pro - Firewall & Security Enhancements
 
 Lightweight firewall addition for ARM/HND based ASUS Routers using IPSet.
-SkynetPro is forked from Skynet Lite by Willem Bartels and is based on the IPTables from Skynet by Adamm.
+Skynet Pro is forked from Skynet Lite by Willem Bartels which is based on the IPTables from Skynet by Adamm.
 
 ## Key features
 - Small one file shell script, no need for an external USB drive.
