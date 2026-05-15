@@ -348,11 +348,19 @@ footer() {
 	if [ "$option" = "cru" ]; then return; fi
 	if [ "$1" != "empty" ]; then
 		printf '%s\n' '-----------------------------------------------------------'
+		local right_text
+		if [ -n "$2" ]; then
+			right_text="$2"
+		elif [ $(ls -1 "$dir_reload" | wc -l) -ge 1 ]; then
+			right_text="[i] Failed download queued"
+		else
+			right_text=""
+		fi
 		printf ' %-25s  %30s\n' \
 			"Uptime $(formatted_File_Age "$dir_system/installtime")" \
-			"$(if [ $(ls -1 "$dir_reload" | wc -l) -ge 1 ]; then echo "[i] Failed download queued"; fi)"
+			"$right_text"
 	fi
-	printf '\033[?7h\n' # enable line wrap
+	printf '\033[?7h\n'
 }
 
 
@@ -905,7 +913,14 @@ case "$command" in
 			echo "$comment;$n;$(formatted_Number $n)" >> "$dir_temp/file.ssv"
 		done < "$dir_system/lookup.csv"
 		sort -t';' -k2nr < "$dir_temp/file.ssv" | awk -F';' '{printf " %-40s  %15s\n", $1, $3}'
-		footer
+
+		total=0
+		filter_Skynet_Set < "$dir_system/lookup.csv" | while IFS=, read -r setname comment; do
+			n=$(ipset -t list "$setname" 2>/dev/null | grep -F 'Number of entries' | grep -Eo '[0-9]+')
+			echo "${n:-0}"
+		done | awk '{s+=$1} END {print s}' > "$dir_temp/total.txt"
+		total=$(cat "$dir_temp/total.txt")
+		footer "" "Total: $(formatted_Number $total)"
 	;;
 
 
@@ -935,7 +950,9 @@ case "$command" in
 			echo "$(lookup_Comment "$setname");$blocked;$(formatted_Number $blocked)" >> "$dir_temp/file.ssv"
 		done
 		sort -t';' -k2nr -k1,1 < "$dir_temp/file.ssv" | awk -F';' '{printf " %-40s  %15s\n", $1, $3}'
-		footer
+
+		total=$(awk -F';' '{s+=$2} END {print s}' < "$dir_temp/file.ssv")
+		footer "" "Total blocked: $(formatted_Number ${total:-0})"
 	;;
 esac
 
