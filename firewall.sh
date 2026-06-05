@@ -34,12 +34,11 @@ filtertraffic="all"		# inbound | outbound | all
 logmode="enabled"		# enabled | disabled
 loginvalid="disabled"	# enabled | disabled
 
-blocklist_set="     <HaGeZi>     https://gitlab.com/hagezi/mirror/-/raw/main/dns-blocklists/ips/tif.txt  {12}
-                    <CINS>       https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/ciarmy.ipset  {12}
-                    <IPsum>      https://raw.githubusercontent.com/stamparm/ipsum/refs/heads/master/levels/2.txt  {16}
-                    <Abuse>      https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-1d.ipv4  {16}
-                    <Tor>        https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/dm_tor.ipset  {4}
-                    <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt  {4}"
+blocklist_set="     <Hagezi>     https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt | https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/ips/tif.txt | https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/ips/tif.txt {12}
+                    <IPsum>      https://raw.githubusercontent.com/stamparm/ipsum/refs/heads/master/levels/2.txt | https://cdn.jsdelivr.net/gh/stamparm/ipsum@master/levels/2.txt {16}
+                    <Abuse>      https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-1d.ipv4 | https://iplists.firehol.org/files/abuseipdb_1d.ipset | https://cdn.jsdelivr.net/gh/borestad/blocklist-abuseipdb@main/abuseipdb-s100-1d.ipv4 {12}
+                    <Tor>        https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/dm_tor.ipset | https://iplists.firehol.org/files/dm_tor.ipset | https://cdn.jsdelivr.net/gh/borestad/firehol-mirror@main/dm_tor.ipset {8}
+                    <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt {8}"
 blocklist_ip="      45.135.180.38
                     45.135.180.177
                     212.104.141.140"
@@ -158,7 +157,14 @@ is_Domain() {
 
 
 filter_URL() {
-	grep -Eo 'https?://\S+'
+	# Extract first URL only (primary), stops at pipe or whitespace
+	grep -Eo 'https?://[^ |{[:space:]]+'  | head -1
+}
+
+
+filter_All_URLs() {
+	# Extract all URLs from a line, stripping {n} and pipe separators
+	grep -Eo 'https?://[^ |{[:space:]]+'
 }
 
 
@@ -211,7 +217,7 @@ filter_Skynet() {
 
 
 filter_Skynet_Set() {
-    grep -E "^Skynet-" | grep -vE "Skynet-(Passlist|Domain|Master)$"
+	grep -E "^Skynet-" | grep -vE "Skynet-(Passlist|Domain|Master)$"
 }
 
 
@@ -243,8 +249,8 @@ log_Tail() {
 
 
 lookup_Comment_Init() {
- 	echo "Skynet-Passlist,$(echo "$passlist_ip" | filter_Comment || echo "passlist")" > "$dir_temp/lookup.csv"
- 	echo "Skynet-Blocklist,$(echo "$blocklist_ip" | filter_Comment || echo "blocklist_ip")" >> "$dir_temp/lookup.csv"
+	echo "Skynet-Passlist,$(echo "$passlist_ip" | filter_Comment || echo "passlist")" > "$dir_temp/lookup.csv"
+	echo "Skynet-Blocklist,$(echo "$blocklist_ip" | filter_Comment || echo "blocklist_ip")" >> "$dir_temp/lookup.csv"
 	echo "Skynet-Domain,$(echo "$blocklist_domain" | filter_Comment || echo "blocklist_domain")" >> "$dir_temp/lookup.csv"
 }
 
@@ -390,7 +396,7 @@ load_Passlist() {
 	done
 	wait
 	# Passlist root hints:
-	url="http://www.internic.net/domain/named.root"
+	url="https://www.internic.net/domain/named.root"
 	temp="$dir_temp/namedroot"; touch "$temp"
 	cache="$dir_cache/namedroot"
 	etag_temp="$dir_temp/namedroot_etag"
@@ -473,6 +479,9 @@ compare_Set() {
 	{ unzip -p "$temp" 2>/dev/null || gunzip -c "$temp" 2>/dev/null || cat "$temp"; } \
 		| filter_set_IP_CIDR | filter_Out_PrivateIP | LC_ALL=C sort -u > "$filtered_temp"
 
+	# Early exit if no valid entries after filtering
+	if [ ! -s "$filtered_temp" ]; then return 0; fi
+
 	if [ "$url" = 'https://feeds.dshield.org/block.txt' ]; then
 		local swap_file="$dir_temp/swap_file"
 		awk '{print $0"/24"}' "$filtered_temp" | LC_ALL=C sort -u > "$swap_file"
@@ -522,11 +531,13 @@ compare_Set() {
 
 
 download_Set() {
-	local cache= comment= curl_exit= dir= etag= etag_temp= filtered_cache= filtered_temp= hashsize= line= list= lookup= setname= response_code= temp= update_cycles= url=
+	local cache= comment= curl_exit= dir= etag= etag_temp= filtered_cache= filtered_temp= hashsize= line= list= lookup= response_code= setname= temp= update_cycles= url= urls= used_fallback=
 	echo "$blocklist_set" | filter_URL_Line > "$dir_temp/blocklist_set"
 
 	while IFS= read -r line; do
-		url=$(echo "$line" | filter_URL)
+		# Primary URL is always first — used for setname/hash regardless of which URL succeeds
+		url=$(echo "$line" | filter_All_URLs | head -1)
+		urls=$(echo "$line" | filter_All_URLs)
 		comment=$(echo "$line" | filter_Comment || echo "<$(basename "$url")>" | filter_Comment)
 		update_cycles=$(echo "$line" | filter_Update_Cycles || echo 4)
 		setname="Skynet-$(echo -n "$url" | md5sum | cut -c1-24)"
@@ -548,7 +559,6 @@ download_Set() {
 			continue
 		fi
 
-		echo " [i] Download $comment"
 		temp="$dir_temp/${setname}_unfiltered"; touch "$temp"
 		cache="$dir_cache/$setname"
 		etag_temp="$dir_temp/${setname}_etag"
@@ -556,23 +566,59 @@ download_Set() {
 		filtered_temp="$dir_temp/${setname}_filtered"
 		filtered_cache="$dir_filtered/$setname"
 
-		response_code=$(curl -sf --location \
-			--limit-rate "$throttle" --user-agent "$useragent" \
-			--connect-timeout 5 --retry 2 --retry-max-time 30 \
-			--remote-time --time-cond "$cache" \
-			--etag-compare "$etag" --etag-save "$etag_temp" \
-			--write-out "%{response_code}" --output "$temp" \
-			--header "Accept-encoding: gzip" "$url"); curl_exit=$?
-		printf '\033[1A\033[K' # cursor up and clear
+		# Try each URL in order until one succeeds
+		curl_exit=1
+		used_fallback="false"
+		local try_url= url_index=0
+		for try_url in $urls; do
+			url_index=$((url_index + 1))
+			if [ $url_index -eq 1 ]; then
+				# Primary URL — use etag and time-cond for efficient caching
+				echo " [i] Download $comment"
+				response_code=$(curl -sf --location \
+					--limit-rate "$throttle" --user-agent "$useragent" \
+					--connect-timeout 5 --retry 2 --retry-max-time 30 \
+					--remote-time --time-cond "$cache" \
+					--etag-compare "$etag" --etag-save "$etag_temp" \
+					--write-out "%{response_code}" --output "$temp" \
+					--header "Accept-encoding: gzip" "$try_url"); curl_exit=$?
+				printf '\033[1A\033[K' # cursor up and clear
+			else
+				# Fallback URL — skip etag/time-cond (different server)
+				log_Skynet "[!] Primary failed, trying fallback $url_index $comment"
+				response_code=$(curl -sf --location \
+					--limit-rate "$throttle" --user-agent "$useragent" \
+					--connect-timeout 5 --retry 2 --retry-max-time 30 \
+					--write-out "%{response_code}" --output "$temp" \
+					--header "Accept-encoding: gzip" "$try_url"); curl_exit=$?
+				if [ $curl_exit -eq 0 ]; then
+					used_fallback="true"
+				fi
+			fi
+			# Break on success (200 or 304)
+			if [ $curl_exit -eq 0 ]; then
+				break
+			fi
+			log_Skynet "$(download_Error $curl_exit $response_code) $try_url"
+		done
 
 		if [ $curl_exit -eq 0 ]; then
+			if [ "$used_fallback" = "true" ]; then
+				# Clear etag so primary gets a clean request next run
+				rm -f "$etag" "$etag_temp"
+				touch "$etag"
+				log_Skynet "[i] Fallback success $comment"
+			fi
 			if [ "$response_code" = "304" ]; then
 				log_Skynet "[i] Fresh $comment"
 			elif compare_Set && [ -s "$cache" ]; then
 				log_Skynet "[!] Identical $comment"
 				mv -f "$temp" "$cache"
 				mv -f "$filtered_temp" "$filtered_cache"
-				mv -f "$etag_temp" "$etag"
+				# Only update etag if primary was used and etag_temp exists
+				if [ "$used_fallback" = "false" ] && [ -s "$etag_temp" ]; then
+					mv -f "$etag_temp" "$etag"
+				fi
 			elif [ ! -s "$filtered_temp" ]; then
 				log_Skynet "[!] Ignore update $comment (zero entries)"
 			else
@@ -580,10 +626,13 @@ download_Set() {
 				load_Set
 				mv -f "$temp" "$cache"
 				mv -f "$filtered_temp" "$filtered_cache"
-				mv -f "$etag_temp" "$etag"
+				# Only update etag if primary was used and etag_temp exists
+				if [ "$used_fallback" = "false" ] && [ -s "$etag_temp" ]; then
+					mv -f "$etag_temp" "$etag"
+				fi
 			fi
 		else
-			log_Skynet "$(download_Error $curl_exit $response_code) $url"
+			log_Skynet "[*] All URLs failed for $comment"
 		fi
 		rm -f "$temp" "$filtered_temp" "$etag_temp"
 	done < "$dir_temp/blocklist_set"
@@ -630,7 +679,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-05 09:46"
+build="2026-06-05 13:48"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
@@ -674,9 +723,9 @@ done
 
 if [ "$command" = "update" ] || [ "$command" = "reset" ]; then
 	for i in 1 2 3 4 5 6 7; do
-		if ping -q -w1 -c1 cloudflare.com >/dev/null 2>&1; then break; fi
-		if ping -q -w1 -c1 fastly.com >/dev/null 2>&1; then break; fi
-		if ping -q -w1 -c1 github.com >/dev/null 2>&1; then break; fi
+		if ping -q -w1 -c1 1.1.1.1 >/dev/null 2>&1; then break; fi
+		if ping -q -w1 -c1 8.8.8.8 >/dev/null 2>&1; then break; fi
+		if ping -q -w1 -c1 9.9.9.9 >/dev/null 2>&1; then break; fi
 		if [ $i -eq 1 ]; then log_Skynet "[!] Waiting for internet connectivity..."; fi
 		if [ $i -eq 7 ]; then log_Skynet "[*] Internet connectivity error"; echo; exit 1; fi
 		sleep 10
@@ -697,6 +746,7 @@ else
 fi
 
 
+touch "$dir_system/lookup.csv"
 cp "$dir_system/lookup.csv" "$dir_temp/lookup.csv"
 unset i
 
@@ -744,7 +794,7 @@ case "$command" in
 		load_Blocklist
 		load_Domain
 		download_Set
-		cru d Skynet_update; minutes=$(( ($(date +%M) + 14) % 15))
+		cru d Skynet_update
 		cru a Skynet_update "12,27,42,57 * * * * nice -n 19 /jffs/scripts/firewall update cru"
 		update_Counter "$dir_system/updatecount" >/dev/null
 		footer
@@ -798,8 +848,7 @@ case "$command" in
 		done < "$dir_system/lookup.csv"
 		footer
 	;;
-
-
+	
 	ip)
 		header "Search for $ip"
 		while IFS=, read -r setname comment; do
@@ -816,7 +865,7 @@ case "$command" in
 	log)
 		header "Update log"
 		if [ -s "$dir_skynet/update.log" ]; then
-			cat "$dir_skynet/update.log" | awk '{print " " $0}'
+			awk '{print " " $0}' "$dir_skynet/update.log"
 		else
 			echo " [i] Empty"
 		fi
@@ -826,7 +875,7 @@ case "$command" in
 
 	warning)
 		header "Warning log"
-		if ! cat "$dir_skynet/update.log" | awk '{print " " $0}' | grep -E '[!]'; then
+		if ! awk '{print " " $0}' "$dir_skynet/update.log" | grep -E '[!]'; then
 			echo " [i] Empty"
 		fi
 		footer
@@ -835,7 +884,7 @@ case "$command" in
 
 	error)
 		header "Error log"
-		if ! cat "$dir_skynet/update.log" | awk '{print " " $0}' | grep -E '[*]'; then
+		if ! awk '{print " " $0}' "$dir_skynet/update.log" | grep -E '[*]'; then
 			echo " [i] Empty"
 		fi
 		footer
