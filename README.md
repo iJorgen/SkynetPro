@@ -8,15 +8,15 @@ Skynet Pro is forked from Skynet Lite by Willem Bartels which is based on the IP
 - Additional Threat Intelligence Sources added.
 - Multiple blocklist URL's as fallback if primary is down.
 - Deduplication of entries to optimize ipset sizes and resource usage.
-- Summary Totals in Output Tables
+- Summary Totals in Output Tables.
 - Support for plain text gzip transfer-encoding.
-- Performance improvements with IPtables scaling
+- Performance improvements with IPtables scaling.
 - Only download and update changed blocklist sets.
 - Use incremental update for all blocklist sets.
-- Improved Filter Functions
+- Improved Filter Functions.
 - For all other lists the ipset swap feature is used.
-- UX & Output Consistency
-- Code Quality Improvements
+- UX & Output Consistency.
+- Bug fixes and Code Quality Improvements.
 
 ## Installation
 Ensure you have an [Asuswrt-Merlin](https://www.asuswrt-merlin.net/) firmware and enabled the JFFS2 partition:
