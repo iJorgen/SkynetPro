@@ -6,13 +6,14 @@
 #          |__/                               
 #
 #   Skynet Pro is enhanced by Jörgen Andersson with:
-#   - Additional blocklists
-#   - Summary Totals in Output Tables
-#   - Optimizations and duplicate Removal Across Blocklists
-#   - Performance improvements with IPtables scaling
-#   - Improved Filter Functions
-#   - UX & Output Consistency
-#   - Code Quality Improvements
+#   - Additional TIF/blocklists.
+#   - Multiple blocklist URL's as fallback if primary is down.
+#   - Summary Totals in Output Tables.
+#   - Optimizations and duplicate Removal Across Blocklists.
+#   - Performance improvements with IPtables scaling.
+#   - Improved Filter Functions.
+#   - UX & Output Consistency.
+#   - Code Quality Improvements.
 #
 #   Code is forked from Skynet Lite by Willem Bartels
 #   IP Blocking for ASUS Routers Using IPSet
@@ -679,7 +680,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-05 13:48"
+build="2026-06-05 14:00"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
