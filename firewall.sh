@@ -333,8 +333,6 @@ footer() {
 		local right_text
 		if [ -n "$2" ]; then
 			right_text="$2"
-		elif [ $(ls -1 "$dir_reload" | wc -l) -ge 1 ]; then
-			right_text="[i] Failed download queued"
 		else
 			right_text=""
 		fi
@@ -415,7 +413,7 @@ load_Passlist() {
 	if [ -f "$cache" ]; then
 		{ gunzip -c "$cache" 2>/dev/null || cat "$cache"; } | filter_IP_CIDR | filter_Out_PrivateIP | awk '!x[$0]++' | awk '{printf "add Skynet-Temp %s comment \"Passlist: Root hints\"\n", $1}' | ipset restore -!
 	fi
-	rm -f "$temp" "$etag_temp";
+	rm -f "$temp" "$etag_temp"
 	ipset swap "Skynet-Passlist" "Skynet-Temp"
 	ipset destroy "Skynet-Temp"
 	hash_Set "$passlist_router $passlist_ip $passlist_domain" "passlist"
@@ -545,15 +543,7 @@ download_Set() {
 			ipset create "$setname" hash:net hashsize "$hashsize" maxelem 524288 comment
 			ipset add Skynet-Master "$setname" comment "$comment"
 		fi
-		if [ -f "$dir_reload/$setname" ]; then
-			if [ $(head -1 "$dir_reload/$setname" 2>/dev/null) -ge 27 ]; then
-				update_cycles=24
-			elif [ $(head -1 "$dir_reload/$setname" 2>/dev/null) -ge 4 ]; then
-				update_cycles=4
-			else
-				update_cycles=1
-			fi
-		fi
+
 		if [ $((updatecount % update_cycles)) -ne 0 ]; then
 			continue
 		fi
@@ -592,14 +582,8 @@ download_Set() {
 				mv -f "$filtered_temp" "$filtered_cache"
 				mv -f "$etag_temp" "$etag"
 			fi
-			rm -f "$dir_reload/$setname"
 		else
 			log_Skynet "$(download_Error $curl_exit $response_code) $url"
-			if [ "$response_code" = "429" ]; then
-				echo "99" > "$dir_reload/$setname"
-			else
-				update_Counter "$dir_reload/$setname" >/dev/null
-			fi
 		fi
 		rm -f "$temp" "$filtered_temp" "$etag_temp"
 	done < "$dir_temp/blocklist_set"
@@ -615,7 +599,7 @@ download_Set() {
 		fi
 	done
 	# Cleanup directories
-	for dir in "$dir_cache" "$dir_etag" "$dir_filtered" "$dir_reload" "$dir_update"; do
+	for dir in "$dir_cache" "$dir_etag" "$dir_filtered" "$dir_update"; do
 		cd "$dir"
 		for setname in $(ls -1 | filter_Skynet_Set); do
 			if ! echo "$list" | grep -q "$setname"; then
@@ -655,12 +639,10 @@ dir_cache="$dir_skynet/cache"
 dir_debug="$dir_skynet/debug"
 dir_etag="$dir_skynet/etag"
 dir_filtered="$dir_skynet/filtered"
-dir_reload="$dir_skynet/reload"
 dir_system="$dir_skynet/system"
 dir_temp="$dir_skynet/temp"
 dir_update="$dir_skynet/update_" # with firmware 386.1 directory 'update' will be deleted after 24 hours!
-mkdir -p "$dir_cache" "$dir_debug" "$dir_etag" "$dir_filtered"
-mkdir -p "$dir_reload" "$dir_system" "$dir_temp" "$dir_update"
+mkdir -p "$dir_cache" "$dir_debug" "$dir_etag" "$dir_filtered" "$dir_system" "$dir_temp" "$dir_update"
 
 
 exec 99>"$lockfile"
@@ -731,7 +713,7 @@ case "$command" in
 		header "Reset"
 		log_Skynet "[i] Install"
 		rm -f "$dir_cache/"* "$dir_debug/"* "$dir_etag/"* "$dir_filtered/"*
-		rm -f "$dir_reload/"* "$dir_system/"* "$dir_temp/"* "$dir_update/"*
+		rm -f "$dir_system/"* "$dir_temp/"* "$dir_update/"*
 		true > "$dir_skynet/update.log"
 		touch "$dir_system/installtime"
 		if [ "$0" != "/jffs/scripts/firewall" ]; then
