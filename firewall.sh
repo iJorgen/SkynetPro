@@ -34,7 +34,7 @@ filtertraffic="all"		# inbound | outbound | all
 logmode="enabled"		# enabled | disabled
 loginvalid="disabled"	# enabled | disabled
 
-blocklist_set="     <HaGeZi>     https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt  {12}
+blocklist_set="     <HaGeZi>     https://gitlab.com/hagezi/mirror/-/raw/main/dns-blocklists/ips/tif.txt  {12}
                     <CINS>       https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/ciarmy.ipset  {12}
                     <IPsum>      https://raw.githubusercontent.com/stamparm/ipsum/refs/heads/master/levels/2.txt  {16}
                     <Abuse>      https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-1d.ipv4  {16}
