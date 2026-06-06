@@ -5,8 +5,8 @@ Skynet Pro is forked from Skynet Lite by Willem Bartels which is based on the IP
 
 ## Key features
 - Small one file shell script, no need for an external USB drive.
-- Additional Threat Intelligence Sources added.
-- Multiple blocklist URL's as fallback if primary is down.
+- Handpicked Threat Intelligence Sources added.
+- Support multiple alternative URL's as fallback if primary is down.
 - Deduplication of entries to optimize ipset sizes and resource usage.
 - Summary Totals in Output Tables.
 - Support for plain text gzip transfer-encoding.
