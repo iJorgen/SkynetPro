@@ -140,35 +140,35 @@ load_LogIPTables() {
 	local pos_wgs_fwd_dst= pos_wgs_fwd_src=
 	if [ "$logmode" = "enabled" ]; then
 		if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
-			# --- WAN inbound LOG (befintlig) ---
-			pos2="$(iptables --line -nL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep "$iface" | awk '{print $1}')"
+			# --- WAN inbound LOG ---
+			pos2="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep "$iface" | awk '{print $1}')"
 			iptables -t raw -I PREROUTING "$pos2" -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
 			# --- WireGuard klienter inbound LOG ---
-			pos_wgc_in="$(iptables --line -nL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep "wgc+" | awk '{print $1}')"
+			pos_wgc_in="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep "wgc+" | awk '{print $1}')"
 			iptables -t raw -I PREROUTING "$pos_wgc_in" -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null
 			# --- WireGuard server: onda svar tillbaka till mobilen LOG ---
-			pos_wgs_fwd_src="$(iptables --line -nL FORWARD | grep -F "Skynet-Master src" | grep -F "DROP" | grep "wgs+" | awk '{print $1}')"
+			pos_wgs_fwd_src="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master src" | grep -F "DROP" | grep "wgs+" | awk '{print $1}')"
 			iptables -I FORWARD "$pos_wgs_fwd_src" -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null
 		fi
 		if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
-			# --- LAN bridge outbound LOG (befintlig) ---
-			pos3="$(iptables --line -nL PREROUTING -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "br+" | awk '{print $1}')"
+			# --- LAN bridge outbound LOG ---
+			pos3="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "br+" | awk '{print $1}')"
 			iptables -t raw -I PREROUTING "$pos3" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
-			# --- Router OUTPUT LOG (befintlig, generell — täcker även wgc+) ---
-			pos4="$(iptables --line -nL OUTPUT -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | head -1 | awk '{print $1}')"
+			# --- Router OUTPUT LOG ---
+			pos4="$(iptables --line -nvL OUTPUT -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | head -1 | awk '{print $1}')"
 			iptables -t raw -I OUTPUT "$pos4" -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
 			# --- WireGuard klienter FORWARD outbound LOG ---
-			pos_wgc_fwd="$(iptables --line -nL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "wgc+" | awk '{print $1}')"
+			pos_wgc_fwd="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "wgc+" | awk '{print $1}')"
 			iptables -I FORWARD "$pos_wgc_fwd" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null
 			# --- WireGuard server FORWARD outbound LOG ---
-			pos_wgs_fwd_dst="$(iptables --line -nL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "wgs+" | awk '{print $1}')"
+			pos_wgs_fwd_dst="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "wgs+" | awk '{print $1}')"
 			iptables -I FORWARD "$pos_wgs_fwd_dst" -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null
 		fi
 		if [ "$(nvram get fw_log_x)" = "drop" ] || [ "$(nvram get fw_log_x)" = "both" ] && [ "$loginvalid" = "enabled" ]; then
 			iptables -I logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null
 		fi
 		if [ "$iotblocked" = "enabled" ]; then
-			pos5="$(iptables --line -nL FORWARD | grep -F "Skynet-IOT" | grep -F "DROP" | awk '{print $1}')"
+			pos5="$(iptables --line -nvL FORWARD | grep -F "Skynet-IOT" | grep -F "DROP" | awk '{print $1}')"
 			iptables -I FORWARD "$pos5" -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
 		fi
 	fi
