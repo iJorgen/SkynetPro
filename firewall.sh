@@ -35,11 +35,11 @@ filtertraffic="all"		# inbound | outbound | all
 logmode="enabled"		# enabled | disabled
 loginvalid="disabled"	# enabled | disabled
 
-blocklist_set="     <Hagezi>     https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt | https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/ips/tif.txt | https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/ips/tif.txt {12}
+blocklist_set="     <Hagezi>     https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/tif.txt | https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/ips/tif.txt | https://gitlab.com/hagezi/mirror/-/raw/main/dns-blocklists/ips/tif.txt | https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/ips/tif.txt {12}
                     <IPsum>      https://raw.githubusercontent.com/stamparm/ipsum/refs/heads/master/levels/2.txt | https://cdn.jsdelivr.net/gh/stamparm/ipsum@master/levels/2.txt {16}
                     <Abuse>      https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-1d.ipv4 | https://iplists.firehol.org/files/abuseipdb_1d.ipset | https://cdn.jsdelivr.net/gh/borestad/blocklist-abuseipdb@main/abuseipdb-s100-1d.ipv4 {12}
                     <Tor>        https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/dm_tor.ipset | https://iplists.firehol.org/files/dm_tor.ipset | https://cdn.jsdelivr.net/gh/borestad/firehol-mirror@main/dm_tor.ipset {8}
-                    <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt {8}"
+                    <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt | https://cdn.jsdelivr.net/gh/bitwire-it/ipblocklist@main/outbound.txt {8}"
 blocklist_ip="      45.135.180.38
                     45.135.180.177
                     212.104.141.140"
