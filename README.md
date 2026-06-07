@@ -11,6 +11,7 @@ Skynet Pro is forked from Skynet Lite by Willem Bartels which is based on the IP
 - Summary Totals in Output Tables.
 - Support for plain text gzip transfer-encoding.
 - Performance improvements with IPtables scaling.
+- Protect all WireGuard server/klient traffic.
 - Only download and update changed blocklist sets.
 - Use incremental update for all blocklist sets.
 - Improved Filter Functions.
