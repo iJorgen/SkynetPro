@@ -107,8 +107,8 @@ unload_IPTables() {
 	# --- WireGuard server (wgs+) ---
 	iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-	# Unload ICMP-rules
-	unload_ICMPPassthrough
+	# Unload passthrough-rules
+	unload_PassthroughRules
 }
 
 
@@ -131,29 +131,39 @@ load_IPTables() {
 		# --- WireGuard server: mobilens trafik ut mot onda IP:er ---
 		iptables -I FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	fi
-	# Load ICMP-rules
-	load_ICMPPassthrough
+	# Load passthrough-rules
+	load_PassthroughRules
 }
 
 
-load_ICMPPassthrough() {
+load_PassthroughRules() {
     local ip
     for ip in $(echo "$passlist_icmp" | filter_IP_CIDR); do
+        # ICMP från LAN
         iptables -t raw -I PREROUTING -i br+ -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        # ICMP från wgc+
         iptables -t raw -I PREROUTING -i wgc+ -p icmp \
             --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
+        # ICMP echo-reply inkommande via WAN
         iptables -t raw -I PREROUTING -i "$iface" -p icmp \
             --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
+        # ICMP från routerns egna processer
         iptables -t raw -I OUTPUT -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
-        # FORWARD — krävs för LAN-klienter som routas via wgc+
+        # ICMP FORWARD via wgc+ (LAN-klienter via Mullvad)
         iptables -I FORWARD -o wgc+ -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        # DNS UDP/53 från LAN — låt nat/DNS Director omdirigera
+        iptables -t raw -I PREROUTING -i br+ -p udp \
+            --dport 53 -d "$ip" -j RETURN 2>/dev/null
+        # DNS TCP/53 från LAN
+        iptables -t raw -I PREROUTING -i br+ -p tcp \
+            --dport 53 -d "$ip" -j RETURN 2>/dev/null
     done
 }
 
-unload_ICMPPassthrough() {
+unload_PassthroughRules() {
     local ip
     for ip in $(echo "$passlist_icmp" | filter_IP_CIDR); do
         iptables -t raw -D PREROUTING -i br+ -p icmp \
@@ -164,9 +174,12 @@ unload_ICMPPassthrough() {
             --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
         iptables -t raw -D OUTPUT -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
-        # FORWARD
         iptables -D FORWARD -o wgc+ -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        iptables -t raw -D PREROUTING -i br+ -p udp \
+            --dport 53 -d "$ip" -j RETURN 2>/dev/null
+        iptables -t raw -D PREROUTING -i br+ -p tcp \
+            --dport 53 -d "$ip" -j RETURN 2>/dev/null
     done
 }
 
@@ -810,7 +823,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-12 15:06"
+build="2026-06-12 15:14"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
