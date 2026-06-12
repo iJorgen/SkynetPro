@@ -139,84 +139,57 @@ unload_IPTables() {
 
 
 load_IPTables() {
-    local lan_ip
-    lan_ip="$(nvram get lan_ipaddr)"
+    logger -t "$SCRIPT_NAME" "Loading IPTables rules"
 
-    # =========================================================
-    # FORWARD: ACCEPT DNSAllow + PingAllow
-    # These MUST be placed BEFORE any DROP rules in the FORWARD
-    # chain. Insert in reverse order using -I FORWARD 1 so that
-    # the final order becomes:
-    #   1: icmp-DNS, 2: icmp-Ping, 3: udp-DNS, 4: tcp-DNS
-    # =========================================================
-    iptables -I FORWARD 1 -o wgc+ -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-    iptables -I FORWARD 1 -o wgc+ -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-    iptables -I FORWARD 1 -o wgc+ -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT
-    iptables -I FORWARD 1 -o wgc+ -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-    # Resulting FORWARD order:
-    #   1: ACCEPT icmp  wgc+ → Skynet-DNSAllow
-    #   2: ACCEPT icmp  wgc+ → Skynet-PingAllow
-    #   3: ACCEPT udp53 wgc+ → Skynet-DNSAllow
-    #   4: ACCEPT tcp53 wgc+ → Skynet-DNSAllow
+    # ──────────────────────────────────────────────
+    # raw PREROUTING — stateless, early drop (no conntrack)
+    # Only block OUTBOUND-initiated traffic from blocked sources
+    # wgc+ inbound is NOT here (would block return traffic)
+    # ──────────────────────────────────────────────
 
-    # =========================================================
-    # raw PREROUTING: ACCEPT DNSAllow + PingAllow (for br0/LAN)
-    # Same reverse-insert logic to achieve correct final order.
-    # =========================================================
-    iptables -t raw -I PREROUTING 1 -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-    iptables -t raw -I PREROUTING 1 -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-    iptables -t raw -I PREROUTING 1 -i br0 -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT
-    iptables -t raw -I PREROUTING 1 -i br0 -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT
+    # Block inbound on WireGuard SERVER (wgs+) from Skynet-Master
+    iptables -t raw -I PREROUTING -i wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-    # =========================================================
-    # nat PREROUTING: DNAT for DNS redirect (br0/LAN)
-    # =========================================================
-    iptables -t nat -I PREROUTING 1 -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
-    iptables -t nat -I PREROUTING 1 -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
+    # Block inbound on LAN/WAN from Skynet-Master
+    iptables -t raw -I PREROUTING -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-    # =========================================================
-    # DROP rules — always inserted AFTER the ACCEPT rules above.
-    # Count the current number of ACCEPT rules in FORWARD and
-    # place DROP rules immediately after them. This is calculated
-    # dynamically to be safe against any pre-existing rules from
-    # the Merlin firmware or other scripts.
-    # =========================================================
-    local fwd_accept_count drop_pos
-    fwd_accept_count="$(iptables --line -nvL FORWARD 2>/dev/null | awk 'NR>2 && /ACCEPT/{c++} END{print c+0}')"
-    drop_pos=$(( fwd_accept_count + 1 ))
+    # ──────────────────────────────────────────────
+    # FORWARD — conntrack-aware, correct place for stateful blocking
+    # ──────────────────────────────────────────────
 
-    if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
-        # raw PREROUTING: WAN + wgc+ inbound DROP
-        # Append after existing rules to avoid displacing ACCEPT rules.
-        local raw_count raw_drop_pos
-        raw_count="$(iptables --line -nvL PREROUTING -t raw 2>/dev/null | awk 'NR>2{c++} END{print c+0}')"
-        raw_drop_pos=$(( raw_count + 1 ))
-        iptables -t raw -I PREROUTING "$raw_drop_pos" -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
-        iptables -t raw -I PREROUTING $(( raw_drop_pos + 1 )) -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
-
-        # FORWARD: wgs+ inbound DROP (after ACCEPT rules)
-        iptables -I FORWARD "$drop_pos" -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
-        # Increment so outbound DROP (if filtertraffic=all) lands after this rule.
-        drop_pos=$(( drop_pos + 1 ))
+    # Allow ESTABLISHED/RELATED inbound via wgc+ (return traffic for outbound connections)
+    local pos_fwd_est
+    pos_fwd_est=$(iptables --line -nvL FORWARD 2>/dev/null | awk '/ACCEPT/ {print $1; exit}')
+    if [ -z "$pos_fwd_est" ]; then
+        pos_fwd_est=1
     fi
+    iptables -I FORWARD "$pos_fwd_est" -i wgc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-    if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
-        # raw PREROUTING: br+ outbound DROP
-        # Re-count since inbound block may have added rules above.
-        local raw_count raw_drop_pos
-        raw_count="$(iptables --line -nvL PREROUTING -t raw 2>/dev/null | awk 'NR>2{c++} END{print c+0}')"
-        raw_drop_pos=$(( raw_count + 1 ))
-        iptables -t raw -I PREROUTING "$raw_drop_pos" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
+    # Block NEW inbound connections via wgc+ from Skynet-Master (not return traffic)
+    iptables -I FORWARD -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-        # raw OUTPUT: outbound DROP for locally generated traffic
-        iptables -t raw -I OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
-
-        # FORWARD: wgc+ + wgs+ outbound DROP (after ACCEPT rules and any inbound DROP)
-        iptables -I FORWARD "$drop_pos" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
-        iptables -I FORWARD $(( drop_pos + 1 )) -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
+    # Block outbound via wgc+ to Skynet-Master destinations
+    local pos_fwd_out
+    pos_fwd_out=$(iptables --line -nvL FORWARD 2>/dev/null | awk '/DROP.*wgc/ {print $1; exit}')
+    if [ -z "$pos_fwd_out" ]; then
+        pos_fwd_out=1
     fi
+    iptables -I FORWARD "$pos_fwd_out" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
+
+    # Allow DNS outbound via wgc+ (bypass Skynet-Master block for DNS)
+    local pos_dns
+    pos_dns=$(iptables --line -nvL FORWARD 2>/dev/null | awk '/DROP.*wgc.*Skynet-Master/ {print $1; exit}')
+    if [ -z "$pos_dns" ]; then
+        pos_dns=1
+    fi
+    iptables -I FORWARD "$pos_dns" -o wgc+ -p udp --dport 53 -j ACCEPT
+    iptables -I FORWARD "$pos_dns" -o wgc+ -p tcp --dport 53 -j ACCEPT
+
+    # Allow ICMP echo-request outbound via wgc+ to Skynet-PingAllow
+    iptables -I FORWARD -o wgc+ -p icmp --icmp-type echo-request -m set --match-set Skynet-PingAllow dst -j ACCEPT
+
+    logger -t "$SCRIPT_NAME" "IPTables rules loaded"
 }
-
 
 unload_LogIPTables() {
 	# --- WAN / LAN / Router LOG ---
