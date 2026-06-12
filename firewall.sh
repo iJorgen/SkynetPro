@@ -141,52 +141,40 @@ unload_IPTables() {
 load_IPTables() {
     logger -t "$SCRIPT_NAME" "Loading IPTables rules"
 
-    # ──────────────────────────────────────────────
-    # raw PREROUTING — stateless, early drop (no conntrack)
-    # Only block OUTBOUND-initiated traffic from blocked sources
-    # wgc+ inbound is NOT here (would block return traffic)
-    # ──────────────────────────────────────────────
+    # ── raw PREROUTING — stateless early drop (wgc+ NOT here, would block return traffic) ──
 
-    # Block inbound on WireGuard SERVER (wgs+) from Skynet-Master
+    # Block inbound on wgs+ from Skynet-Master
     iptables -t raw -I PREROUTING -i wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-    # Block inbound on LAN/WAN from Skynet-Master
+    # Block inbound on all other interfaces from Skynet-Master
     iptables -t raw -I PREROUTING -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-    # ──────────────────────────────────────────────
-    # FORWARD — conntrack-aware, correct place for stateful blocking
-    # ──────────────────────────────────────────────
+    # ── FORWARD — conntrack-aware, correct place for wgc+ stateful blocking ──
 
     # Allow ESTABLISHED/RELATED inbound via wgc+ (return traffic for outbound connections)
-    local pos_fwd_est
-    pos_fwd_est=$(iptables --line -nvL FORWARD 2>/dev/null | awk '/ACCEPT/ {print $1; exit}')
-    if [ -z "$pos_fwd_est" ]; then
-        pos_fwd_est=1
-    fi
-    iptables -I FORWARD "$pos_fwd_est" -i wgc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    local pos_est
+    pos_est=$(iptables --line -nvL FORWARD 2>/dev/null | awk 'NR>2 && /ACCEPT/ {print $1; exit}')
+    [ -z "$pos_est" ] && pos_est=1
+    iptables -I FORWARD "$pos_est" -i wgc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-    # Block NEW inbound connections via wgc+ from Skynet-Master (not return traffic)
-    iptables -I FORWARD -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
+    # Block NEW inbound via wgc+ from Skynet-Master (not return traffic)
+    iptables -I FORWARD 1 -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
     # Block outbound via wgc+ to Skynet-Master destinations
-    local pos_fwd_out
-    pos_fwd_out=$(iptables --line -nvL FORWARD 2>/dev/null | awk '/DROP.*wgc/ {print $1; exit}')
-    if [ -z "$pos_fwd_out" ]; then
-        pos_fwd_out=1
-    fi
-    iptables -I FORWARD "$pos_fwd_out" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
+    local pos_out
+    pos_out=$(iptables --line -nvL FORWARD 2>/dev/null | awk 'NR>2 && /DROP.*wgc/ {print $1; exit}')
+    [ -z "$pos_out" ] && pos_out=1
+    iptables -I FORWARD "$pos_out" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
 
-    # Allow DNS outbound via wgc+ (bypass Skynet-Master block for DNS)
+    # Allow DNS outbound via wgc+ (must be BEFORE the DROP above)
     local pos_dns
-    pos_dns=$(iptables --line -nvL FORWARD 2>/dev/null | awk '/DROP.*wgc.*Skynet-Master/ {print $1; exit}')
-    if [ -z "$pos_dns" ]; then
-        pos_dns=1
-    fi
+    pos_dns=$(iptables --line -nvL FORWARD 2>/dev/null | awk 'NR>2 && /DROP.*wgc.*Skynet-Master/ {print $1; exit}')
+    [ -z "$pos_dns" ] && pos_dns=1
     iptables -I FORWARD "$pos_dns" -o wgc+ -p udp --dport 53 -j ACCEPT
     iptables -I FORWARD "$pos_dns" -o wgc+ -p tcp --dport 53 -j ACCEPT
 
     # Allow ICMP echo-request outbound via wgc+ to Skynet-PingAllow
-    iptables -I FORWARD -o wgc+ -p icmp --icmp-type echo-request -m set --match-set Skynet-PingAllow dst -j ACCEPT
+    iptables -I FORWARD 1 -o wgc+ -p icmp --icmp-type echo-request -m set --match-set Skynet-PingAllow dst -j ACCEPT
 
     logger -t "$SCRIPT_NAME" "IPTables rules loaded"
 }
@@ -208,84 +196,95 @@ unload_LogIPTables() {
 
 
 load_LogIPTables() {
-	local pos_wan_in= pos_lan_out= pos_router_out= pos_iot=
-	local pos_wgc_in= pos_wgc_fwd=
-	local pos_wgs_fwd_dst= pos_wgs_fwd_src=
-	if [ "$logmode" = "enabled" ]; then
-		if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
-			# --- WAN inbound LOG ---
-			while iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null; do :; done
-			pos_wan_in="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep -F "$iface" | awk '{print $1}')"
-			if [ -z "$pos_wan_in" ]; then
-				log_Skynet "[!] LOG position lookup failed for $iface (WAN inbound)"
-			else
-				iptables -t raw -I PREROUTING "$pos_wan_in" -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
-			fi
-			# --- WireGuard clients inbound LOG ---
-			while iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null; do :; done
-			pos_wgc_in="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep -F "wgc+" | awk '{print $1}')"
-			if [ -z "$pos_wgc_in" ]; then
-				log_Skynet "[!] LOG position lookup failed for wgc+ (WGC inbound)"
-			else
-				iptables -t raw -I PREROUTING "$pos_wgc_in" -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null
-			fi
-			# --- WireGuard server: block malicious replies toward mobile clients LOG ---
-			while iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null; do :; done
-			pos_wgs_fwd_src="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master src" | grep -F "DROP" | grep -F "wgs+" | awk '{print $1}')"
-			if [ -z "$pos_wgs_fwd_src" ]; then
-				log_Skynet "[!] LOG position lookup failed for wgs+ (WGS inbound)"
-			else
-				iptables -I FORWARD "$pos_wgs_fwd_src" -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null
-			fi
-		fi
-		if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
-			# --- LAN bridge outbound LOG ---
-			while iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
-			pos_lan_out="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | grep -F "br+" | awk '{print $1}')"
-			if [ -z "$pos_lan_out" ]; then
-				log_Skynet "[!] LOG position lookup failed for br+ (LAN outbound)"
-			else
-				iptables -t raw -I PREROUTING "$pos_lan_out" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
-			fi
-			# --- Router OUTPUT LOG ---
-			while iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
-			pos_router_out="$(iptables --line -nvL OUTPUT -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | head -1 | awk '{print $1}')"
-			if [ -z "$pos_router_out" ]; then
-				log_Skynet "[!] LOG position lookup failed for OUTPUT (router outbound)"
-			else
-				iptables -t raw -I OUTPUT "$pos_router_out" -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
-			fi
-			# --- WireGuard clients FORWARD outbound LOG ---
-			while iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null; do :; done
-			pos_wgc_fwd="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep -F "wgc+" | awk '{print $1}')"
-			if [ -z "$pos_wgc_fwd" ]; then
-				log_Skynet "[!] LOG position lookup failed for wgc+ (WGC outbound)"
-			else
-				iptables -I FORWARD "$pos_wgc_fwd" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null
-			fi
-			# --- WireGuard server FORWARD outbound LOG ---
-			while iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null; do :; done
-			pos_wgs_fwd_dst="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep -F "wgs+" | awk '{print $1}')"
-			if [ -z "$pos_wgs_fwd_dst" ]; then
-				log_Skynet "[!] LOG position lookup failed for wgs+ (WGS outbound)"
-			else
-				iptables -I FORWARD "$pos_wgs_fwd_dst" -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null
-			fi
-		fi
-		if { [ "$(nvram get fw_log_x)" = "drop" ] || [ "$(nvram get fw_log_x)" = "both" ]; } && [ "$loginvalid" = "enabled" ]; then
-			while iptables -D logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null; do :; done
-			iptables -I logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null
-		fi
-		if [ "$iotblocked" = "enabled" ]; then
-			while iptables -D FORWARD -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null; do :; done
-			pos_iot="$(iptables --line -nvL FORWARD | grep -F "Skynet-IOT" | grep -F "DROP" | awk '{print $1}')"
-			if [ -z "$pos_iot" ]; then
-				log_Skynet "[!] LOG position lookup failed for IOT"
-			else
-				iptables -I FORWARD "$pos_iot" -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
-			fi
-		fi
-	fi
+    local pos_wan_in= pos_lan_out= pos_router_out= pos_iot=
+    local pos_wgc_in= pos_wgc_fwd=
+    local pos_wgs_fwd_dst= pos_wgs_fwd_src=
+    if [ "$logmode" = "enabled" ]; then
+        if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
+
+            # --- WAN inbound LOG ---
+            while iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null; do :; done
+            pos_wan_in="$(iptables --line -nvL PREROUTING -t raw | awk 'NR>2 && /Skynet-Master src/ && /DROP/ && /'"$iface"'/ {print $1; exit}')"
+            if [ -z "$pos_wan_in" ]; then
+                log_Skynet "[!] LOG position lookup failed for $iface (WAN inbound)"
+            else
+                iptables -t raw -I PREROUTING "$pos_wan_in" -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
+            fi
+
+            # --- WireGuard clients inbound LOG ---
+            # NOTE: wgc+ DROP moved from raw PREROUTING to FORWARD (--ctstate NEW)
+            # LOG rule follows the same chain/table as the DROP rule
+            while iptables -D FORWARD -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null; do :; done
+            pos_wgc_in="$(iptables --line -nvL FORWARD | awk 'NR>2 && /Skynet-Master src/ && /DROP/ && /wgc\+/ {print $1; exit}')"
+            if [ -z "$pos_wgc_in" ]; then
+                log_Skynet "[!] LOG position lookup failed for wgc+ (WGC inbound)"
+            else
+                iptables -I FORWARD "$pos_wgc_in" -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null
+            fi
+
+            # --- WireGuard server: block malicious replies toward mobile clients LOG ---
+            while iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null; do :; done
+            pos_wgs_fwd_src="$(iptables --line -nvL FORWARD | awk 'NR>2 && /Skynet-Master src/ && /DROP/ && /wgs\+/ {print $1; exit}')"
+            if [ -z "$pos_wgs_fwd_src" ]; then
+                log_Skynet "[!] LOG position lookup failed for wgs+ (WGS inbound)"
+            else
+                iptables -I FORWARD "$pos_wgs_fwd_src" -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null
+            fi
+
+        fi
+        if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
+
+            # --- LAN bridge outbound LOG ---
+            while iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
+            pos_lan_out="$(iptables --line -nvL PREROUTING -t raw | awk 'NR>2 && /Skynet-Master dst/ && /DROP/ && /br\+/ {print $1; exit}')"
+            if [ -z "$pos_lan_out" ]; then
+                log_Skynet "[!] LOG position lookup failed for br+ (LAN outbound)"
+            else
+                iptables -t raw -I PREROUTING "$pos_lan_out" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
+            fi
+
+            # --- Router OUTPUT LOG ---
+            while iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
+            pos_router_out="$(iptables --line -nvL OUTPUT -t raw | awk 'NR>2 && /Skynet-Master dst/ && /DROP/ {print $1; exit}')"
+            if [ -z "$pos_router_out" ]; then
+                log_Skynet "[!] LOG position lookup failed for OUTPUT (router outbound)"
+            else
+                iptables -t raw -I OUTPUT "$pos_router_out" -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
+            fi
+
+            # --- WireGuard clients FORWARD outbound LOG ---
+            while iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null; do :; done
+            pos_wgc_fwd="$(iptables --line -nvL FORWARD | awk 'NR>2 && /Skynet-Master dst/ && /DROP/ && /wgc\+/ {print $1; exit}')"
+            if [ -z "$pos_wgc_fwd" ]; then
+                log_Skynet "[!] LOG position lookup failed for wgc+ (WGC outbound)"
+            else
+                iptables -I FORWARD "$pos_wgc_fwd" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null
+            fi
+
+            # --- WireGuard server FORWARD outbound LOG ---
+            while iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null; do :; done
+            pos_wgs_fwd_dst="$(iptables --line -nvL FORWARD | awk 'NR>2 && /Skynet-Master dst/ && /DROP/ && /wgs\+/ {print $1; exit}')"
+            if [ -z "$pos_wgs_fwd_dst" ]; then
+                log_Skynet "[!] LOG position lookup failed for wgs+ (WGS outbound)"
+            else
+                iptables -I FORWARD "$pos_wgs_fwd_dst" -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null
+            fi
+
+        fi
+        if { [ "$(nvram get fw_log_x)" = "drop" ] || [ "$(nvram get fw_log_x)" = "both" ]; } && [ "$loginvalid" = "enabled" ]; then
+            while iptables -D logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null; do :; done
+            iptables -I logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null
+        fi
+        if [ "$iotblocked" = "enabled" ]; then
+            while iptables -D FORWARD -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null; do :; done
+            pos_iot="$(iptables --line -nvL FORWARD | awk 'NR>2 && /Skynet-IOT/ && /DROP/ {print $1; exit}')"
+            if [ -z "$pos_iot" ]; then
+                log_Skynet "[!] LOG position lookup failed for IOT"
+            else
+                iptables -I FORWARD "$pos_iot" -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
+            fi
+        fi
+    fi
 }
 
 
