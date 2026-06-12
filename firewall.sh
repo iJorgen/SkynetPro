@@ -46,11 +46,7 @@ blocklist_ip="      45.135.180.38
                     45.135.180.177
                     212.104.141.140"
 blocklist_domain=""
-passlist_ip="       8.8.8.8
-                    8.8.4.4
-                    1.1.1.1
-                    1.0.0.1
-                    45.90.28.0
+passlist_ip="       45.90.28.0
                     45.90.30.0
                     188.172.192.71
                     38.175.117.129
@@ -74,12 +70,25 @@ passlist_ip="       8.8.8.8
                     217.146.21.59
                     95.179.134.211"
 passlist_domain=""
+passlist_icmp="     8.8.8.8
+                    8.8.4.4
+                    1.1.1.1
+                    1.0.0.1
+                    1.1.1.2
+                    1.0.0.2
+                    1.1.1.3
+                    1.0.0.3
+                    9.9.9.9
+                    9.9.9.10
+                    9.9.9.11
+                    149.112.112.112
+                    149.112.112.110
+                    149.112.112.111"
 
 
 ###############
 #- Functions -#
 ###############
-
 
 unload_IPTables() {
 	# --- WAN inbound (befintlig) ---
@@ -98,6 +107,8 @@ unload_IPTables() {
 	# --- WireGuard server (wgs+) ---
 	iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
+	# Unload ICMP-rules
+	unload_ICMPPassthrough
 }
 
 
@@ -120,6 +131,36 @@ load_IPTables() {
 		# --- WireGuard server: mobilens trafik ut mot onda IP:er ---
 		iptables -I FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	fi
+	# Load ICMP-rules
+	load_ICMPPassthrough
+}
+
+
+load_ICMPPassthrough() {
+    local ip
+    for ip in $(echo "$passlist_icmp" | filter_IP_CIDR); do
+        # Utgående echo-request från LAN och WireGuard-klienter
+        iptables -t raw -I PREROUTING -i br+ -p icmp \
+            --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        iptables -t raw -I PREROUTING -i wgc+ -p icmp \
+            --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        # Inkommande echo-reply via WAN
+        iptables -t raw -I PREROUTING -i "$iface" -p icmp \
+            --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
+    done
+}
+
+
+unload_ICMPPassthrough() {
+    local ip
+    for ip in $(echo "$passlist_icmp" | filter_IP_CIDR); do
+        iptables -t raw -D PREROUTING -i br+ -p icmp \
+            --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        iptables -t raw -D PREROUTING -i wgc+ -p icmp \
+            --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        iptables -t raw -D PREROUTING -i "$iface" -p icmp \
+            --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
+    done
 }
 
 
