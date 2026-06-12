@@ -141,43 +141,62 @@ unload_IPTables() {
 load_IPTables() {
     logger -t "$SCRIPT_NAME" "Loading IPTables rules"
 
-    # ── raw PREROUTING — stateless early drop (wgc+ NOT here, would block return traffic) ──
+    # ── raw PREROUTING — stateless early drop (before conntrack, lowest overhead) ──
+    # wgc+ is intentionally excluded here: blocking return traffic at raw would
+    # break outbound-initiated connections through the WireGuard client tunnel.
 
-    # Block inbound on wgs+ from Skynet-Master
+    # Drop inbound on wgs+ (WireGuard server) from any Skynet-Master source
+    # not whitelisted in Skynet-Passlist
     iptables -t raw -I PREROUTING -i wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-    # Block inbound on all other interfaces from Skynet-Master
+    # Drop inbound on all remaining interfaces (WAN etc.) from Skynet-Master
+    # not whitelisted in Skynet-Passlist
     iptables -t raw -I PREROUTING -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-    # ── FORWARD — conntrack-aware, correct place for wgc+ stateful blocking ──
+    # ── FORWARD — conntrack-aware blocking for wgc+ (WireGuard client tunnel) ──
+    #
+    # Rules are inserted in REVERSE order using -I FORWARD 1 so that the
+    # final chain order (top to bottom) becomes:
+    #
+    #   1. ACCEPT  icmp echo-request  out wgc+  dst in Skynet-PingAllow
+    #   2. ACCEPT  tcp  dport 53      out wgc+  (DNS before dst-DROP)
+    #   3. ACCEPT  udp  dport 53      out wgc+  (DNS before dst-DROP)
+    #   4. DROP    all                out wgc+  dst in Skynet-Master, not in Skynet-Passlist
+    #   5. ACCEPT  ESTABLISHED/RELATED in wgc+ (return traffic for outbound connections)
+    #   6. DROP    NEW                in wgc+  src in Skynet-Master, not in Skynet-Passlist
+    #
+    # This avoids fragile line-number lookups that break when the chain is
+    # modified between queries.
 
-    # Allow ESTABLISHED/RELATED inbound via wgc+ (return traffic for outbound connections)
-    local pos_est
-    pos_est=$(iptables --line -nvL FORWARD 2>/dev/null | awk 'NR>2 && /ACCEPT/ {print $1; exit}')
-    [ -z "$pos_est" ] && pos_est=1
-    iptables -I FORWARD "$pos_est" -i wgc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-    # Block NEW inbound via wgc+ from Skynet-Master (not return traffic)
+    # Rule 6 (inserted first → ends up at the bottom of our block)
+    # Drop new inbound connections via wgc+ from blocked sources
     iptables -I FORWARD 1 -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP
 
-    # Block outbound via wgc+ to Skynet-Master destinations
-    local pos_out
-    pos_out=$(iptables --line -nvL FORWARD 2>/dev/null | awk 'NR>2 && /DROP.*wgc/ {print $1; exit}')
-    [ -z "$pos_out" ] && pos_out=1
-    iptables -I FORWARD "$pos_out" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
+    # Rule 5
+    # Allow return traffic for connections that were initiated from inside
+    # the network out through the wgc+ tunnel
+    iptables -I FORWARD 1 -i wgc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-    # Allow DNS outbound via wgc+ (must be BEFORE the DROP above)
-    local pos_dns
-    pos_dns=$(iptables --line -nvL FORWARD 2>/dev/null | awk 'NR>2 && /DROP.*wgc.*Skynet-Master/ {print $1; exit}')
-    [ -z "$pos_dns" ] && pos_dns=1
-    iptables -I FORWARD "$pos_dns" -o wgc+ -p udp --dport 53 -j ACCEPT
-    iptables -I FORWARD "$pos_dns" -o wgc+ -p tcp --dport 53 -j ACCEPT
+    # Rule 4
+    # Drop outbound traffic via wgc+ to blocked destinations
+    iptables -I FORWARD 1 -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP
 
-    # Allow ICMP echo-request outbound via wgc+ to Skynet-PingAllow
+    # Rule 3 — must be inserted AFTER rule 4 (ends up ABOVE it in the chain)
+    # Allow outbound UDP DNS via wgc+ regardless of destination block list
+    iptables -I FORWARD 1 -o wgc+ -p udp --dport 53 -j ACCEPT
+
+    # Rule 2 — same reasoning as rule 3
+    # Allow outbound TCP DNS via wgc+ regardless of destination block list
+    iptables -I FORWARD 1 -o wgc+ -p tcp --dport 53 -j ACCEPT
+
+    # Rule 1 (inserted last → ends up at the top of our block)
+    # Allow outbound ICMP echo-request via wgc+ to whitelisted ping targets
+    # Placed first so ping to allowed hosts is never caught by the dst-DROP
     iptables -I FORWARD 1 -o wgc+ -p icmp --icmp-type echo-request -m set --match-set Skynet-PingAllow dst -j ACCEPT
 
     logger -t "$SCRIPT_NAME" "IPTables rules loaded"
 }
+
 
 unload_LogIPTables() {
 	# --- WAN / LAN / Router LOG ---
