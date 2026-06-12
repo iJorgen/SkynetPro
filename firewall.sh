@@ -139,17 +139,20 @@ load_IPTables() {
 load_ICMPPassthrough() {
     local ip
     for ip in $(echo "$passlist_icmp" | filter_IP_CIDR); do
-        # Utgående echo-request från LAN och WireGuard-klienter
+        # LAN-klienter utgående
         iptables -t raw -I PREROUTING -i br+ -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
+        # WireGuard-klienter utgående
         iptables -t raw -I PREROUTING -i wgc+ -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
         # Inkommande echo-reply via WAN
         iptables -t raw -I PREROUTING -i "$iface" -p icmp \
             --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
+        # Routerns egna processer (ping från routern själv)
+        iptables -t raw -I OUTPUT -p icmp \
+            --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
     done
 }
-
 
 unload_ICMPPassthrough() {
     local ip
@@ -160,6 +163,9 @@ unload_ICMPPassthrough() {
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
         iptables -t raw -D PREROUTING -i "$iface" -p icmp \
             --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
+        # Routerns egna processer
+        iptables -t raw -D OUTPUT -p icmp \
+            --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
     done
 }
 
