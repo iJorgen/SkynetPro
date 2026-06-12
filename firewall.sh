@@ -834,7 +834,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-12 11:06"
+build="2026-06-12 11:18"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
