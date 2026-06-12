@@ -94,47 +94,43 @@ passlist_ping="8.8.8.8
 unload_IPTables() {
     # =========================================================
     # FORWARD: Remove ACCEPT rules for DNSAllow + PingAllow
-    # Must be removed before DROP rules to avoid leaving stale
-    # ACCEPT rules if script is restarted without full unload.
-    # while-loop ensures duplicates are also fully removed.
     # =========================================================
-    while iptables -D FORWARD -o wgc+ -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null; do :; done
-    while iptables -D FORWARD -o wgc+ -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT 2>/dev/null; do :; done
-    while iptables -D FORWARD -o wgc+ -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null; do :; done
-    while iptables -D FORWARD -o wgc+ -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null; do :; done
+    while iptables -D FORWARD -o wgc+ -p icmp --icmp-type echo-request -m set --match-set Skynet-PingAllow dst -j ACCEPT 2>/dev/null; do :; done
+    while iptables -D FORWARD -o wgc+ -p udp --dport 53 -j ACCEPT 2>/dev/null; do :; done
+    while iptables -D FORWARD -o wgc+ -p tcp --dport 53 -j ACCEPT 2>/dev/null; do :; done
 
     # =========================================================
-    # raw PREROUTING: Remove ACCEPT rules for DNSAllow + PingAllow
+    # FORWARD: Remove conntrack-aware wgc+ rules
+    # --ctstate NEW måste matcha exakt vad load_IPTables() satte
     # =========================================================
-    while iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null; do :; done
-    while iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT 2>/dev/null; do :; done
-    while iptables -t raw -D PREROUTING -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null; do :; done
-    while iptables -t raw -D PREROUTING -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null; do :; done
+    while iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
+    while iptables -D FORWARD -i wgc+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null; do :; done
+    while iptables -D FORWARD -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
+
+    # =========================================================
+    # FORWARD: Remove wgs+ rules
+    # =========================================================
+    while iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
+    while iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
+
+    # =========================================================
+    # raw PREROUTING: Remove DROP rules
+    # =========================================================
+    while iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
+    while iptables -t raw -D PREROUTING -i wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
+    while iptables -t raw -D PREROUTING -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
+    while iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
+
+    # =========================================================
+    # raw OUTPUT: Remove outbound DROP
+    # =========================================================
+    while iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
 
     # =========================================================
     # nat PREROUTING: Remove DNS redirect DNAT rules
     # =========================================================
     while iptables -t nat -D PREROUTING -i br0 -p udp --dport 53 ! -d "$(nvram get lan_ipaddr)" -j DNAT --to-destination "$(nvram get lan_ipaddr)":53 2>/dev/null; do :; done
     while iptables -t nat -D PREROUTING -i br0 -p tcp --dport 53 ! -d "$(nvram get lan_ipaddr)" -j DNAT --to-destination "$(nvram get lan_ipaddr)":53 2>/dev/null; do :; done
-
-    # =========================================================
-    # FORWARD: Remove DROP rules (inbound + outbound)
-    # =========================================================
-    while iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
-    while iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
-    while iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
-
-    # =========================================================
-    # raw PREROUTING: Remove DROP rules (inbound + outbound)
-    # =========================================================
-    while iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
-    while iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null; do :; done
-    while iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
-
-    # =========================================================
-    # raw OUTPUT: Remove outbound DROP for locally generated traffic
-    # =========================================================
-    while iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null; do :; done
 }
 
 
@@ -199,18 +195,32 @@ load_IPTables() {
 
 
 unload_LogIPTables() {
-	# --- WAN / LAN / Router LOG ---
-	while iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null; do :; done
-	while iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
-	while iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
-	while iptables -D logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null; do :; done
-	while iptables -D FORWARD -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null; do :; done
-	# --- WireGuard clients LOG ---
-	while iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null; do :; done
-	while iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null; do :; done
-	# --- WireGuard server LOG ---
-	while iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null; do :; done
-	while iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null; do :; done
+    # --- WAN inbound LOG ---
+    while iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- LAN bridge outbound LOG ---
+    while iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- Router OUTPUT LOG ---
+    while iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- logdrop INVALID LOG ---
+    while iptables -D logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- IOT LOG ---
+    while iptables -D FORWARD -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- WireGuard clients inbound LOG (FORWARD, inte raw PREROUTING) ---
+    while iptables -D FORWARD -i wgc+ -m conntrack --ctstate NEW -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- WireGuard clients outbound LOG ---
+    while iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- WireGuard server outbound LOG ---
+    while iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null; do :; done
+
+    # --- WireGuard server inbound LOG ---
+    while iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null; do :; done
 }
 
 
