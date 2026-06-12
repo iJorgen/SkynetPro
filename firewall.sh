@@ -48,6 +48,8 @@ blocklist_ip="      45.135.180.38
 blocklist_domain=""
 passlist_ip="       8.8.8.8
                     8.8.4.4
+                    1.1.1.1
+                    1.0.0.1
                     45.90.28.0
                     45.90.30.0
                     188.172.192.71
@@ -760,7 +762,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-12 13:46"
+build="2026-06-12 14:00"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
