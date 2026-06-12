@@ -40,34 +40,11 @@ blocklist_set="     <Hagezi>     https://raw.githubusercontent.com/hagezi/dns-bl
                     <IPsum>      https://raw.githubusercontent.com/stamparm/ipsum/refs/heads/master/levels/2.txt | https://cdn.jsdelivr.net/gh/stamparm/ipsum@master/levels/2.txt {16}
                     <Abuse>      https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-1d.ipv4 | https://iplists.firehol.org/files/abuseipdb_1d.ipset | https://cdn.jsdelivr.net/gh/borestad/blocklist-abuseipdb@main/abuseipdb-s100-1d.ipv4 {12}
                     <Tor>        https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/dm_tor.ipset | https://iplists.firehol.org/files/dm_tor.ipset | https://cdn.jsdelivr.net/gh/borestad/firehol-mirror@main/dm_tor.ipset {8}
+					<DoH>        https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/ips/doh.txt | https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/ips/doh.txt | https://gitlab.com/hagezi/mirror/-/raw/main/dns-blocklists/ips/doh.txt | https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/ips/doh.txt {32}
                     <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt | https://cdn.jsdelivr.net/gh/bitwire-it/ipblocklist@main/outbound.txt {8}"
-blocklist_ip="      45.135.180.38
-                    45.135.180.177
-                    212.104.141.140"
+blocklist_ip=""
 blocklist_domain=""
-passlist_ip="       45.90.28.0
-                    45.90.30.0
-                    188.172.192.71
-                    38.175.117.129
-                    217.146.31.87
-                    146.19.3.129
-                    188.172.223.3
-                    38.175.118.175
-                    188.172.219.167
-                    45.11.106.155
-                    95.179.134.211
-                    1.1.1.1
-                    8.8.8.8
-                    8.8.4.4
-                    9.9.9.11
-                    149.112.112.11
-                    208.67.222.222
-                    208.67.220.220
-                    94.140.14.49
-                    76.76.2.11
-                    76.76.2.42
-                    137.66.7.89
-                    98.128.175.45"
+passlist_ip=""
 passlist_domain=""
 
 
@@ -757,7 +734,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-07 15:26"
+build="2026-06-12 09:36"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
