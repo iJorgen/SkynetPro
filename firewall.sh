@@ -118,35 +118,35 @@ unload_IPTables() {
 
 
 load_IPTables() {
-	local lan_ip
-	lan_ip="$(nvram get lan_ipaddr)"
-	# --- DNS Allow / Ping Allow: inserted before Skynet-Master rules ---
-	# Explicit positions 1-4 ensure correct order regardless of insertion sequence.
-	iptables -t raw -I PREROUTING 1 -i br0 -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-	iptables -t raw -I PREROUTING 2 -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-	iptables -t raw -I PREROUTING 3 -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
-	iptables -t raw -I PREROUTING 4 -i br0 -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT
-	# Redirect all outbound plain DNS to local resolver (catches all port 53, not just DNSAllow IPs).
-	iptables -t nat -I PREROUTING 1 -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
-	iptables -t nat -I PREROUTING 2 -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
-	if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
-		# --- WAN inbound ---
-		iptables -t raw -I PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-		# --- WireGuard clients: inbound from VPN server ---
-		iptables -t raw -I PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-		# --- WireGuard server: block malicious replies toward mobile clients ---
-		iptables -I FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-	fi
-	if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
-		# --- LAN bridge outbound ---
-		iptables -t raw -I PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-		# --- Router own outbound (covers wgc+ routed traffic) ---
-		iptables -t raw -I OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-		# --- WireGuard clients: outbound routed via Mullvad ---
-		iptables -I FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-		# --- WireGuard server: mobile traffic toward blocked IPs ---
-		iptables -I FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-	fi
+    local lan_ip
+    lan_ip="$(nvram get lan_ipaddr)"
+
+    # Pos 1-4: ACCEPT (DNSAllow + PingAllow) — måste vara före DROP
+    iptables -t raw -I PREROUTING 1 -i br0 -p icmp   -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
+    iptables -t raw -I PREROUTING 2 -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
+    iptables -t raw -I PREROUTING 3 -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
+    iptables -t raw -I PREROUTING 4 -i br0 -p icmp   -m set --match-set Skynet-PingAllow dst -j ACCEPT
+
+    # nat-tabellen: separat kedja, påverkar ej raw PREROUTING
+    iptables -t nat -I PREROUTING 1 -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
+    iptables -t nat -I PREROUTING 2 -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
+
+    if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
+        # Pos 5-6: DROP inbound ($iface, wgc+) — matchar ej br0, men håll ordning
+        iptables -t raw -I PREROUTING 5 -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
+        iptables -t raw -I PREROUTING 6 -i wgc+     -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
+        iptables -I FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
+    fi
+
+    if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
+        # Pos 7 (all) eller 5 (outbound only): br+ DROP — explicit, aldrig före ACCEPT
+        local next_pos
+        next_pos="$(iptables --line -nvL PREROUTING -t raw | awk 'NR>2{c++}END{print c+1}')"
+        iptables -t raw -I PREROUTING "${next_pos:-5}" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+        iptables -t raw -I OUTPUT    -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+        iptables -I FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+        iptables -I FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+    fi
 }
 
 
