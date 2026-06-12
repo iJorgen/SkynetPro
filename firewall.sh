@@ -11,10 +11,11 @@
 #   - Summary Totals in Output Tables.
 #   - Optimizations and duplicate Removal Across Blocklists.
 #   - Performance improvements with IPtables scaling.
-#   - Protect all WireGuard server/klient traffic with SkyNet Pro.
+#   - Protect all WireGuard server/client traffic with Skynet Pro.
 #   - Improved Filter Functions.
 #   - UX & Output Consistency.
 #   - Code Quality Improvements.
+#   - DNS Allow and Ping Allow ipsets with DNAT redirect.
 #
 #   Code is forked from Skynet Lite by Willem Bartels
 #   IP Blocking for ASUS Routers Using IPSet
@@ -44,8 +45,42 @@ blocklist_set="     <Hagezi>     https://raw.githubusercontent.com/hagezi/dns-bl
                     <BitWire>    https://raw.githubusercontent.com/bitwire-it/ipblocklist/refs/heads/main/outbound.txt | https://cdn.jsdelivr.net/gh/bitwire-it/ipblocklist@main/outbound.txt {8}"
 blocklist_ip=""
 blocklist_domain=""
-passlist_ip=""
+passlist_ip="       45.90.28.0
+                    45.90.30.0
+                    188.172.192.71
+                    38.175.117.129
+                    217.146.31.87
+                    146.19.3.129
+                    188.172.223.3
+                    38.175.118.175
+                    135.181.102.167
+                    185.87.111.48
+                    95.179.134.211
+                    188.172.219.167
+                    45.11.106.155
+                    199.247.16.158
+                    217.146.22.163
+                    194.45.101.249
+                    45.142.247.197
+                    78.255.154.59
+                    38.175.112.132
+                    178.255.153.47
+                    185.234.213.131
+                    217.146.21.59
+                    95.179.134.211"
 passlist_domain=""
+
+# Allow ICMP + plain DNS (port 53) to these IPs/domains. TCP/443 (DoH) remains blocked.
+# Plain DNS is transparently redirected to the local resolver via DNAT.
+# Supports both IP addresses and domain names.
+passlist_dns="  8.8.8.8
+                8.8.4.4
+                1.1.1.1
+                1.0.0.1"
+
+# Allow ICMP only to these IPs/domains. Port 53 and 443 remain blocked.
+# Supports both IP addresses and domain names.
+passlist_ping=""
 
 
 ###############
@@ -54,17 +89,26 @@ passlist_domain=""
 
 
 unload_IPTables() {
-	# --- WAN inbound (befintlig) ---
+	local lan_ip
+	lan_ip="$(nvram get lan_ipaddr)"
+	# --- DNS Allow / Ping Allow / DNAT ---
+	iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+	iptables -t raw -D PREROUTING -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+	iptables -t raw -D PREROUTING -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+	iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT 2>/dev/null
+	iptables -t nat -D PREROUTING -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53 2>/dev/null
+	iptables -t nat -D PREROUTING -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53 2>/dev/null
+	# --- WAN inbound ---
 	iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-	# --- LAN bridge outbound (befintlig) ---
+	# --- LAN bridge outbound ---
 	iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-	# --- Router egna processer utgående (befintlig) ---
+	# --- Router own outbound processes ---
 	iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	iptables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
 	ip6tables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
 	iptables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
 	ip6tables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	# --- WireGuard klienter (wgc+) ---
+	# --- WireGuard clients (wgc+) ---
 	iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
 	iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	# --- WireGuard server (wgs+) ---
@@ -74,35 +118,46 @@ unload_IPTables() {
 
 
 load_IPTables() {
+	local lan_ip
+	lan_ip="$(nvram get lan_ipaddr)"
+	# --- DNS Allow / Ping Allow: inserted before Skynet-Master rules ---
+	# Explicit positions 1-4 ensure correct order regardless of insertion sequence.
+	iptables -t raw -I PREROUTING 1 -i br0 -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT
+	iptables -t raw -I PREROUTING 2 -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
+	iptables -t raw -I PREROUTING 3 -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT
+	iptables -t raw -I PREROUTING 4 -i br0 -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT
+	# Redirect all outbound plain DNS to local resolver (catches all port 53, not just DNSAllow IPs).
+	iptables -t nat -I PREROUTING 1 -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
+	iptables -t nat -I PREROUTING 2 -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
 	if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
-		# --- WAN inbound (befintlig) ---
+		# --- WAN inbound ---
 		iptables -t raw -I PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-		# --- WireGuard klienter: inbound från VPN-server ---
+		# --- WireGuard clients: inbound from VPN server ---
 		iptables -t raw -I PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-		# --- WireGuard server: onda svar tillbaka till mobilen ---
+		# --- WireGuard server: block malicious replies toward mobile clients ---
 		iptables -I FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
 	fi
 	if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
-		# --- LAN bridge outbound (befintlig) ---
+		# --- LAN bridge outbound ---
 		iptables -t raw -I PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-		# --- Router egna processer utgående, täcker även wgc+ (befintlig) ---
+		# --- Router own outbound (covers wgc+ routed traffic) ---
 		iptables -t raw -I OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-		# --- WireGuard klienter: outbound routed (LAN-klienter ut via Mullvad) ---
+		# --- WireGuard clients: outbound routed via Mullvad ---
 		iptables -I FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-		# --- WireGuard server: mobilens trafik ut mot onda IP:er ---
+		# --- WireGuard server: mobile traffic toward blocked IPs ---
 		iptables -I FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	fi
 }
 
 
 unload_LogIPTables() {
-	# --- Befintliga LOG-regler ---
+	# --- WAN / LAN / Router LOG ---
 	iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
 	iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
 	iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
 	iptables -D logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null
 	iptables -D FORWARD -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
-	# --- WireGuard klienter LOG ---
+	# --- WireGuard clients LOG ---
 	iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null
 	iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null
 	# --- WireGuard server LOG ---
@@ -112,27 +167,27 @@ unload_LogIPTables() {
 
 
 load_LogIPTables() {
-	local pos2= pos3= pos4= pos5=
+	local pos_wan_in= pos_lan_out= pos_router_out= pos_iot=
 	local pos_wgc_in= pos_wgc_fwd=
 	local pos_wgs_fwd_dst= pos_wgs_fwd_src=
 	if [ "$logmode" = "enabled" ]; then
 		if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
 			# --- WAN inbound LOG ---
-			pos2="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep "$iface" | awk '{print $1}')"
-			if [ -z "$pos2" ]; then
+			pos_wan_in="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep -F "$iface" | awk '{print $1}')"
+			if [ -z "$pos_wan_in" ]; then
 				log_Skynet "[!] LOG position lookup failed for $iface (WAN inbound)"
 			else
-				iptables -t raw -I PREROUTING "$pos2" -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
+				iptables -t raw -I PREROUTING "$pos_wan_in" -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
 			fi
-			# --- WireGuard klienter inbound LOG ---
-			pos_wgc_in="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep "wgc+" | awk '{print $1}')"
+			# --- WireGuard clients inbound LOG ---
+			pos_wgc_in="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master src" | grep -F "DROP" | grep -F "wgc+" | awk '{print $1}')"
 			if [ -z "$pos_wgc_in" ]; then
 				log_Skynet "[!] LOG position lookup failed for wgc+ (WGC inbound)"
 			else
 				iptables -t raw -I PREROUTING "$pos_wgc_in" -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null
 			fi
-			# --- WireGuard server: onda svar tillbaka till mobilen LOG ---
-			pos_wgs_fwd_src="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master src" | grep -F "DROP" | grep "wgs+" | awk '{print $1}')"
+			# --- WireGuard server: block malicious replies toward mobile clients LOG ---
+			pos_wgs_fwd_src="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master src" | grep -F "DROP" | grep -F "wgs+" | awk '{print $1}')"
 			if [ -z "$pos_wgs_fwd_src" ]; then
 				log_Skynet "[!] LOG position lookup failed for wgs+ (WGS inbound)"
 			else
@@ -141,43 +196,43 @@ load_LogIPTables() {
 		fi
 		if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
 			# --- LAN bridge outbound LOG ---
-			pos3="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "br+" | awk '{print $1}')"
-			if [ -z "$pos3" ]; then
+			pos_lan_out="$(iptables --line -nvL PREROUTING -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | grep -F "br+" | awk '{print $1}')"
+			if [ -z "$pos_lan_out" ]; then
 				log_Skynet "[!] LOG position lookup failed for br+ (LAN outbound)"
 			else
-				iptables -t raw -I PREROUTING "$pos3" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
+				iptables -t raw -I PREROUTING "$pos_lan_out" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
 			fi
 			# --- Router OUTPUT LOG ---
-			pos4="$(iptables --line -nvL OUTPUT -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | head -1 | awk '{print $1}')"
-			if [ -z "$pos4" ]; then
+			pos_router_out="$(iptables --line -nvL OUTPUT -t raw | grep -F "Skynet-Master dst" | grep -F "DROP" | head -1 | awk '{print $1}')"
+			if [ -z "$pos_router_out" ]; then
 				log_Skynet "[!] LOG position lookup failed for OUTPUT (router outbound)"
 			else
-				iptables -t raw -I OUTPUT "$pos4" -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
+				iptables -t raw -I OUTPUT "$pos_router_out" -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
 			fi
-			# --- WireGuard klienter FORWARD outbound LOG ---
-			pos_wgc_fwd="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "wgc+" | awk '{print $1}')"
+			# --- WireGuard clients FORWARD outbound LOG ---
+			pos_wgc_fwd="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep -F "wgc+" | awk '{print $1}')"
 			if [ -z "$pos_wgc_fwd" ]; then
 				log_Skynet "[!] LOG position lookup failed for wgc+ (WGC outbound)"
 			else
 				iptables -I FORWARD "$pos_wgc_fwd" -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null
 			fi
 			# --- WireGuard server FORWARD outbound LOG ---
-			pos_wgs_fwd_dst="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep "wgs+" | awk '{print $1}')"
+			pos_wgs_fwd_dst="$(iptables --line -nvL FORWARD | grep -F "Skynet-Master dst" | grep -F "DROP" | grep -F "wgs+" | awk '{print $1}')"
 			if [ -z "$pos_wgs_fwd_dst" ]; then
 				log_Skynet "[!] LOG position lookup failed for wgs+ (WGS outbound)"
 			else
 				iptables -I FORWARD "$pos_wgs_fwd_dst" -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null
 			fi
 		fi
-		if [ "$(nvram get fw_log_x)" = "drop" ] || [ "$(nvram get fw_log_x)" = "both" ] && [ "$loginvalid" = "enabled" ]; then
+		if { [ "$(nvram get fw_log_x)" = "drop" ] || [ "$(nvram get fw_log_x)" = "both" ]; } && [ "$loginvalid" = "enabled" ]; then
 			iptables -I logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null
 		fi
 		if [ "$iotblocked" = "enabled" ]; then
-			pos5="$(iptables --line -nvL FORWARD | grep -F "Skynet-IOT" | grep -F "DROP" | awk '{print $1}')"
-			if [ -z "$pos5" ]; then
+			pos_iot="$(iptables --line -nvL FORWARD | grep -F "Skynet-IOT" | grep -F "DROP" | awk '{print $1}')"
+			if [ -z "$pos_iot" ]; then
 				log_Skynet "[!] LOG position lookup failed for IOT"
 			else
-				iptables -I FORWARD "$pos5" -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
+				iptables -I FORWARD "$pos_iot" -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
 			fi
 		fi
 	fi
@@ -186,6 +241,8 @@ load_LogIPTables() {
 
 unload_IPSets() {
 	ipset -q destroy Skynet-Master
+	ipset -q destroy Skynet-DNSAllow
+	ipset -q destroy Skynet-PingAllow
 	ipset -n list | filter_Skynet | xargs -I setname ipset -q destroy setname
 }
 
@@ -212,13 +269,11 @@ is_Domain() {
 
 
 filter_URL() {
-	# Extract first URL only (primary), stops at pipe or whitespace
 	grep -Eo 'https?://[^ |{[:space:]]+'  | head -1
 }
 
 
 filter_All_URLs() {
-	# Extract all URLs from a line, stripping {n} and pipe separators
 	grep -Eo 'https?://[^ |{[:space:]]+'
 }
 
@@ -241,7 +296,6 @@ filter_set_IP_CIDR() {
 
 
 filter_Out_PrivateIP() {
-	# https://regex101.com/r/vDjcX3/1
 	grep -Ev '^(0\.|10\.|100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\.|127\.|169\.254\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.0\.0\.|192\.0\.2\.|192\.168\.|198\.1[8-9]\.|198\.51\.100\.|203\.0\.113\.|2(2[4-9]|[3-4][0-9]|5[0-5])\.)'
 }
 
@@ -272,12 +326,12 @@ filter_Skynet() {
 
 
 filter_Skynet_Set() {
-	grep -E "^Skynet-" | grep -vE "Skynet-(Passlist|Domain|Master)$"
+	grep -E "^Skynet-" | grep -vE "Skynet-(Passlist|Domain|Master|DNSAllow|PingAllow)$"
 }
 
 
 download_Error() {
-	if [ "$1" = "22" ]; then # HTTP error code >= 400
+	if [ "$1" = "22" ]; then
 		printf "[*] Download error HTTP/%s " "$2"
 	else
 		printf "[*] Download error cURL/%s " "$1"
@@ -367,7 +421,7 @@ update_Counter() {
 
 header() {
 	if [ "$option" = "cru" ]; then return; fi
-	printf '\033[?7l' # disable line wrap
+	printf '\033[?7l'
 	clear; sed -n '2,7s/#//p' "$0"
 	echo " Skynet Pro build $build by Jörgen Andersson"
 	echo " Forked from Skynet Lite $version by Willem Bartels"
@@ -440,17 +494,17 @@ load_Passlist() {
 	local cache= curl_exit= domain= etag= etag_temp= n=0 response_code= temp= url=
 	ipset -q destroy "Skynet-Temp"
 	ipset create Skynet-Temp hash:net comment
-	# Passlist router and reserved IP addresses:
+	# Passlist router and reserved IP addresses
 	echo "$passlist_router" | tr -d '\t' | filter_IP_Line | ipset restore -!
-	# Passlist ip:
+	# Passlist static IPs
 	echo "$passlist_ip" | filter_IP_CIDR | filter_Out_PrivateIP | awk '!x[$0]++' | awk '{printf "add Skynet-Temp %s comment \"Passlist: %s\"\n", $1, $1}' | ipset restore -!
-	# Passlist domain:
+	# Passlist domains
 	for domain in $(echo "$passlist_domain" | filter_Domain | awk '!x[$0]++'); do
 		lookup_Domain "$domain" | filter_Out_PrivateIP | awk -v domain="$domain" '{printf "add Skynet-Temp %s comment \"Passlist: %s\"\n", $1, domain}' | ipset restore -! &
 		n=$((n + 1)); if [ $((n % 50)) -eq 0 ]; then wait; fi
 	done
 	wait
-	# Passlist root hints:
+	# Passlist root hints
 	url="https://www.internic.net/domain/named.root"
 	temp="$dir_temp/namedroot"; touch "$temp"
 	cache="$dir_cache/namedroot"
@@ -478,6 +532,61 @@ load_Passlist() {
 	ipset swap "Skynet-Passlist" "Skynet-Temp"
 	ipset destroy "Skynet-Temp"
 	hash_Set "$passlist_router $passlist_ip $passlist_domain" "passlist"
+}
+
+
+load_DNSAllow() {
+	# Populate Skynet-DNSAllow from passlist_dns (IPs and/or domains).
+	# Allows ICMP + plain DNS (port 53). DoH (TCP/443) remains blocked.
+	# Private IPs are not filtered out — internal DNS servers are valid entries.
+	if hash_Unmodified "$passlist_dns" "passlist_dns"; then return; fi
+	log_Skynet "[i] Update DNS Allow"
+	local domain= n=0
+	ipset -q destroy "Skynet-Temp"
+	ipset create Skynet-Temp hash:net comment
+	if [ -n "$passlist_dns" ]; then
+		echo "$passlist_dns" | filter_IP_CIDR | awk '!x[$0]++' \
+			| awk '{printf "add Skynet-Temp %s comment \"DNSAllow: %s\"\n", $1, $1}' \
+			| ipset restore -!
+		for domain in $(echo "$passlist_dns" | filter_Domain | awk '!x[$0]++'); do
+			lookup_Domain "$domain" \
+				| awk -v d="$domain" '{printf "add Skynet-Temp %s comment \"DNSAllow: %s\"\n", $1, d}' \
+				| ipset restore -! &
+			n=$((n + 1)); if [ $((n % 50)) -eq 0 ]; then wait; fi
+		done
+		wait
+	fi
+	ipset swap "Skynet-DNSAllow" "Skynet-Temp"
+	ipset destroy "Skynet-Temp"
+	hash_Set "$passlist_dns" "passlist_dns"
+}
+
+
+load_PingAllow() {
+	# Populate Skynet-PingAllow from passlist_ping (IPs and/or domains).
+	# Allows ICMP only. Port 53 and 443 remain blocked.
+	# hash_Unmodified checked first so the set is cleared if passlist_ping is emptied.
+	# Private IPs are not filtered out — internal hosts are valid entries.
+	if hash_Unmodified "$passlist_ping" "passlist_ping"; then return; fi
+	log_Skynet "[i] Update Ping Allow"
+	local domain= n=0
+	ipset -q destroy "Skynet-Temp"
+	ipset create Skynet-Temp hash:net comment
+	if [ -n "$passlist_ping" ]; then
+		echo "$passlist_ping" | filter_IP_CIDR | awk '!x[$0]++' \
+			| awk '{printf "add Skynet-Temp %s comment \"PingAllow: %s\"\n", $1, $1}' \
+			| ipset restore -!
+		for domain in $(echo "$passlist_ping" | filter_Domain | awk '!x[$0]++'); do
+			lookup_Domain "$domain" \
+				| awk -v d="$domain" '{printf "add Skynet-Temp %s comment \"PingAllow: %s\"\n", $1, d}' \
+				| ipset restore -! &
+			n=$((n + 1)); if [ $((n % 50)) -eq 0 ]; then wait; fi
+		done
+		wait
+	fi
+	ipset swap "Skynet-PingAllow" "Skynet-Temp"
+	ipset destroy "Skynet-Temp"
+	hash_Set "$passlist_ping" "passlist_ping"
 }
 
 
@@ -534,7 +643,6 @@ compare_Set() {
 	{ unzip -p "$temp" 2>/dev/null || gunzip -c "$temp" 2>/dev/null || cat "$temp"; } \
 		| filter_set_IP_CIDR | filter_Out_PrivateIP | LC_ALL=C sort -u > "$filtered_temp"
 
-	# Early exit if no valid entries after filtering
 	if [ ! -s "$filtered_temp" ]; then return 0; fi
 
 	if [ "$url" = 'https://feeds.dshield.org/block.txt' ]; then
@@ -590,7 +698,6 @@ download_Set() {
 	echo "$blocklist_set" | filter_URL_Line > "$dir_temp/blocklist_set"
 
 	while IFS= read -r line; do
-		# Primary URL is always first — used for setname/hash regardless of which URL succeeds
 		url=$(echo "$line" | filter_All_URLs | head -1)
 		urls=$(echo "$line" | filter_All_URLs)
 		comment=$(echo "$line" | filter_Comment || echo "<$(basename "$url")>" | filter_Comment)
@@ -604,7 +711,7 @@ download_Set() {
 				*hagezi*)    hashsize=131072  ;;
 				*abuseipdb*) hashsize=65536  ;;
 				*ipsum*)     hashsize=32768  ;;
-				*)           hashsize=16384   ;;
+				*)           hashsize=16384  ;;
 			esac
 			ipset create "$setname" hash:net hashsize "$hashsize" maxelem 524288 comment
 			ipset add Skynet-Master "$setname" comment "$comment"
@@ -621,14 +728,12 @@ download_Set() {
 		filtered_temp="$dir_temp/${setname}_filtered"
 		filtered_cache="$dir_filtered/$setname"
 
-		# Try each URL in order until one succeeds
 		curl_exit=1
 		used_fallback="false"
 		local try_url= url_index=0
 		for try_url in $urls; do
 			url_index=$((url_index + 1))
 			if [ $url_index -eq 1 ]; then
-				# Primary URL — use etag and time-cond for efficient caching
 				echo " [i] Download $comment"
 				response_code=$(curl -sf --location \
 					--limit-rate "$throttle" --user-agent "$useragent" \
@@ -637,9 +742,8 @@ download_Set() {
 					--etag-compare "$etag" --etag-save "$etag_temp" \
 					--write-out "%{response_code}" --output "$temp" \
 					--header "Accept-encoding: gzip" "$try_url"); curl_exit=$?
-				printf '\033[1A\033[K' # cursor up and clear
+				printf '\033[1A\033[K'
 			else
-				# Fallback URL — skip etag/time-cond (different server)
 				log_Skynet "[!] Primary failed, trying fallback $url_index $comment"
 				response_code=$(curl -sf --location \
 					--limit-rate "$throttle" --user-agent "$useragent" \
@@ -650,7 +754,6 @@ download_Set() {
 					used_fallback="true"
 				fi
 			fi
-			# Break on success (200 or 304)
 			if [ $curl_exit -eq 0 ]; then
 				break
 			fi
@@ -659,7 +762,6 @@ download_Set() {
 
 		if [ $curl_exit -eq 0 ]; then
 			if [ "$used_fallback" = "true" ]; then
-				# Clear etag so primary gets a clean request next run
 				rm -f "$etag" "$etag_temp"
 				touch "$etag"
 				log_Skynet "[i] Fallback success $comment"
@@ -670,7 +772,6 @@ download_Set() {
 				log_Skynet "[!] Identical $comment"
 				mv -f "$temp" "$cache"
 				mv -f "$filtered_temp" "$filtered_cache"
-				# Only update etag if primary was used and etag_temp exists
 				if [ "$used_fallback" = "false" ] && [ -s "$etag_temp" ]; then
 					mv -f "$etag_temp" "$etag"
 				fi
@@ -681,7 +782,6 @@ download_Set() {
 				load_Set
 				mv -f "$temp" "$cache"
 				mv -f "$filtered_temp" "$filtered_cache"
-				# Only update etag if primary was used and etag_temp exists
 				if [ "$used_fallback" = "false" ] && [ -s "$etag_temp" ]; then
 					mv -f "$etag_temp" "$etag"
 				fi
@@ -694,7 +794,7 @@ download_Set() {
 	sort -t, -k2 < "$dir_temp/lookup.csv" > "$dir_system/lookup.csv"
 
 	if hash_Unmodified "$blocklist_set" "blocklist_set"; then return; fi
-	# Unload unlisted sets
+	# Remove sets no longer in blocklist_set
 	list=$(filter_Skynet_Set < "$dir_system/lookup.csv" | awk -F, '{print $1}')
 	for setname in $(ipset list Skynet-Master | filter_Skynet_Set | awk '{print $1}'); do
 		if ! echo "$list" | grep -q "$setname"; then
@@ -702,7 +802,7 @@ download_Set() {
 			ipset -q destroy "$setname"
 		fi
 	done
-	# Cleanup directories
+	# Cleanup cache/etag/filtered/update directories
 	for dir in "$dir_cache" "$dir_etag" "$dir_filtered" "$dir_update"; do
 		cd "$dir"
 		for setname in $(ls -1 | filter_Skynet_Set); do
@@ -724,7 +824,7 @@ download_Set() {
 
 
 ############################
-#- Initialize Skynet Lite -#
+#- Initialize Skynet Pro  -#
 ############################
 
 
@@ -734,7 +834,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-12 09:36"
+build="2026-06-12 11:06"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
@@ -745,7 +845,7 @@ dir_etag="$dir_skynet/etag"
 dir_filtered="$dir_skynet/filtered"
 dir_system="$dir_skynet/system"
 dir_temp="$dir_skynet/temp"
-dir_update="$dir_skynet/update_" # with firmware 386.1 directory 'update' will be deleted after 24 hours!
+dir_update="$dir_skynet/update_"
 mkdir -p "$dir_cache" "$dir_debug" "$dir_etag" "$dir_filtered" "$dir_system" "$dir_temp" "$dir_update"
 
 
@@ -755,7 +855,7 @@ if ! flock -n 99; then
 		log_Skynet "[!] Skynet Lite is locked, next update scheduled"
 		exit 1;
 	fi
-	printf '\n\033[1A' # newline and cursor up
+	printf '\n\033[1A'
 	printf '[i] Skynet Lite is locked, retry command every 5 seconds...'
 	sleep 5
 	exec "$0" "$command"
@@ -777,9 +877,12 @@ done
 
 
 if [ "$command" = "update" ] || [ "$command" = "reset" ]; then
+	# Use router gateway and ISP DNS for connectivity check — avoids hitting IPs in blocklists
+	gw="$(nvram get wan0_gateway)"
+	isp_dns="$(nvram get wan0_dns | awk '{print $1}')"
 	for i in 1 2 3 4 5 6 7; do
-		if ping -q -w1 -c1 1.1.1.1 >/dev/null 2>&1; then break; fi
-		if ping -q -w1 -c1 8.8.8.8 >/dev/null 2>&1; then break; fi
+		if [ -n "$gw" ] && ping -q -w1 -c1 "$gw" >/dev/null 2>&1; then break; fi
+		if [ -n "$isp_dns" ] && ping -q -w1 -c1 "$isp_dns" >/dev/null 2>&1; then break; fi
 		if ping -q -w1 -c1 9.9.9.9 >/dev/null 2>&1; then break; fi
 		if [ $i -eq 1 ]; then log_Skynet "[!] Waiting for internet connectivity..."; fi
 		if [ $i -eq 7 ]; then log_Skynet "[*] Internet connectivity error"; echo; exit 1; fi
@@ -807,7 +910,7 @@ unset i
 
 
 #######################
-#- Start Skynet Lite -#
+#- Start Skynet Pro  -#
 #######################
 
 
@@ -823,7 +926,7 @@ case "$command" in
 		touch "$dir_system/installtime"
 		if [ "$0" != "/jffs/scripts/firewall" ]; then
 			mv -f "$0" "/jffs/scripts/firewall"
-			log_Skynet "[!] Skynet Lite moved to /jffs/scripts/firewall"
+			log_Skynet "[!] Skynet Pro moved to /jffs/scripts/firewall"
 		fi
 		if [ ! -f "/jffs/scripts/firewall-start" ]; then
 			echo "#!/bin/sh
@@ -842,10 +945,16 @@ case "$command" in
 			create Skynet-Domain hash:net comment
 			add Skynet-Master Skynet-Blocklist comment "blocklist_ip"
 			add Skynet-Master Skynet-Domain comment "blocklist_domain"' | tr -d '\t' | ipset restore -!
+		ipset -q destroy Skynet-DNSAllow
+		ipset -q destroy Skynet-PingAllow
+		ipset create Skynet-DNSAllow  hash:net comment
+		ipset create Skynet-PingAllow hash:net comment
 		load_IPTables
 		load_LogIPTables
 		lookup_Comment_Init
 		load_Passlist
+		load_DNSAllow
+		load_PingAllow
 		load_Blocklist
 		load_Domain
 		download_Set
@@ -860,6 +969,8 @@ case "$command" in
 		header "Update"
 		lookup_Comment_Init
 		load_Passlist
+		load_DNSAllow
+		load_PingAllow
 		load_Blocklist
 		load_Domain
 		download_Set
@@ -869,7 +980,7 @@ case "$command" in
 
 	uninstall)
 		header "Uninstall"
-		log_Skynet "[*] Uninstall Skynet Lite..."
+		log_Skynet "[*] Uninstall Skynet Pro..."
 		cru d Skynet_update
 		if [ -f "/jffs/scripts/firewall-start" ]; then
 			chmod 755 "/jffs/scripts/firewall-start"
@@ -881,7 +992,7 @@ case "$command" in
 		unload_IPSets
 		rm -fr "$dir_skynet"
 		rm -f "$lockfile" "$0"
-		echo " [i] Skynet Lite has been successfully uninstalled"
+		echo " [i] Skynet Pro has been successfully uninstalled"
 		footer "empty"; exit 0
 	;;
 
@@ -903,7 +1014,8 @@ case "$command" in
 		done < "$dir_system/lookup.csv"
 		footer
 	;;
-	
+
+
 	ip)
 		header "Search for $ip"
 		while IFS=, read -r setname comment; do
@@ -976,20 +1088,101 @@ case "$command" in
 
 	entries)
 		header "List" "Number of entries"
-		true > "$dir_temp/file.ssv" # semicolon separated value
+		true > "$dir_temp/file.ssv"
 		while IFS=, read -r setname comment; do
 			n=$(ipset -t list "$setname" | grep -F 'Number of entries' | grep -Eo '[0-9]+')
 			echo "$comment;$n;$(formatted_Number $n)" >> "$dir_temp/file.ssv"
 		done < "$dir_system/lookup.csv"
 		sort -t';' -k2nr < "$dir_temp/file.ssv" | awk -F';' '{printf " %-40s  %15s\n", $1, $3}'
 
-		total=0
+		# Show DNSAllow and PingAllow entry counts separately
+		dns_n=$(ipset -t list Skynet-DNSAllow 2>/dev/null | grep -F 'Number of entries' | grep -Eo '[0-9]+')
+		ping_n=$(ipset -t list Skynet-PingAllow 2>/dev/null | grep -F 'Number of entries' | grep -Eo '[0-9]+')
+		printf ' %-40s  %15s\n' "DNSAllow" "$(formatted_Number ${dns_n:-0})"
+		printf ' %-40s  %15s\n' "PingAllow" "$(formatted_Number ${ping_n:-0})"
+
 		filter_Skynet_Set < "$dir_system/lookup.csv" | while IFS=, read -r setname comment; do
 			n=$(ipset -t list "$setname" 2>/dev/null | grep -F 'Number of entries' | grep -Eo '[0-9]+')
 			echo "${n:-0}"
 		done | awk '{s+=$1} END {print s}' > "$dir_temp/total.txt"
 		total=$(cat "$dir_temp/total.txt")
 		footer "" "Total: $(formatted_Number $total)"
+	;;
+
+
+	dnsallow)
+		# Manage Skynet-DNSAllow entries at runtime without restarting.
+		# Usage: firewall dnsallow add <ip>   — add an IP
+		#        firewall dnsallow del <ip>   — remove an IP
+		#        firewall dnsallow list       — show all entries
+		case "$option" in
+			add)
+				entry=$(echo "$3" | is_IP)
+				if [ -z "$entry" ]; then
+					echo " [!] Invalid IP: $3"
+				elif ipset -q test Skynet-DNSAllow "$entry"; then
+					echo " [i] Already in DNSAllow: $entry"
+				else
+					ipset add Skynet-DNSAllow "$entry" comment "DNSAllow: $entry"
+					echo " [i] Added to DNSAllow: $entry"
+				fi
+			;;
+			del)
+				entry=$(echo "$3" | is_IP)
+				if [ -z "$entry" ]; then
+					echo " [!] Invalid IP: $3"
+				elif ipset -q test Skynet-DNSAllow "$entry"; then
+					ipset del Skynet-DNSAllow "$entry"
+					echo " [i] Removed from DNSAllow: $entry"
+				else
+					echo " [i] Not in DNSAllow: $entry"
+				fi
+			;;
+			list|*)
+				header "DNS Allow" "Entries: $(ipset -t list Skynet-DNSAllow | grep -F 'Number of entries' | grep -Eo '[0-9]+')"
+				ipset list Skynet-DNSAllow | grep -E '^\s*(([0-9]{1,3}\.){3}[0-9]{1,3})' \
+					| awk '{printf " %-20s  %s\n", $1, $3}'
+				footer
+			;;
+		esac
+	;;
+
+
+	pingallow)
+		# Manage Skynet-PingAllow entries at runtime without restarting.
+		# Usage: firewall pingallow add <ip>  — add an IP
+		#        firewall pingallow del <ip>  — remove an IP
+		#        firewall pingallow list      — show all entries
+		case "$option" in
+			add)
+				entry=$(echo "$3" | is_IP)
+				if [ -z "$entry" ]; then
+					echo " [!] Invalid IP: $3"
+				elif ipset -q test Skynet-PingAllow "$entry"; then
+					echo " [i] Already in PingAllow: $entry"
+				else
+					ipset add Skynet-PingAllow "$entry" comment "PingAllow: $entry"
+					echo " [i] Added to PingAllow: $entry"
+				fi
+			;;
+			del)
+				entry=$(echo "$3" | is_IP)
+				if [ -z "$entry" ]; then
+					echo " [!] Invalid IP: $3"
+				elif ipset -q test Skynet-PingAllow "$entry"; then
+					ipset del Skynet-PingAllow "$entry"
+					echo " [i] Removed from PingAllow: $entry"
+				else
+					echo " [i] Not in PingAllow: $entry"
+				fi
+			;;
+			list|*)
+				header "Ping Allow" "Entries: $(ipset -t list Skynet-PingAllow | grep -F 'Number of entries' | grep -Eo '[0-9]+')"
+				ipset list Skynet-PingAllow | grep -E '^\s*(([0-9]{1,3}\.){3}[0-9]{1,3})' \
+					| awk '{printf " %-20s  %s\n", $1, $3}'
+				footer
+			;;
+		esac
 	;;
 
 
@@ -1001,6 +1194,12 @@ case "$command" in
 		echo " firewall fresh"
 		echo " firewall frequency"
 		echo " firewall entries"
+		echo " firewall dnsallow list"
+		echo " firewall dnsallow add <ip>"
+		echo " firewall dnsallow del <ip>"
+		echo " firewall pingallow list"
+		echo " firewall pingallow add <ip>"
+		echo " firewall pingallow del <ip>"
 		echo " firewall log"
 		echo " firewall warning"
 		echo " firewall error"
@@ -1014,7 +1213,7 @@ case "$command" in
 
 	*)
 		header "Blocklist" "Packets blocked"
-		true > "$dir_temp/file.ssv" # semicolon separated value
+		true > "$dir_temp/file.ssv"
 		ipset list Skynet-Master | filter_Skynet | awk '{print $1 "," $3}' | while IFS=, read -r setname blocked; do
 			echo "$(lookup_Comment "$setname");$blocked;$(formatted_Number $blocked)" >> "$dir_temp/file.ssv"
 		done
