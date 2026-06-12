@@ -92,31 +92,37 @@ passlist_ping="8.8.8.8
 
 
 unload_IPTables() {
-	local lan_ip
-	lan_ip="$(nvram get lan_ipaddr)"
-	# --- DNS Allow / Ping Allow / DNAT ---
-	iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
-	iptables -t raw -D PREROUTING -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
-	iptables -t raw -D PREROUTING -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
-	iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT 2>/dev/null
-	iptables -t nat -D PREROUTING -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53 2>/dev/null
-	iptables -t nat -D PREROUTING -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53 2>/dev/null
-	# --- WAN inbound ---
-	iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-	# --- LAN bridge outbound ---
-	iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-	# --- Router own outbound processes ---
-	iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-	iptables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	ip6tables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	iptables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	ip6tables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	# --- WireGuard clients (wgc+) ---
-	iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
-	iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-	# --- WireGuard server (wgs+) ---
-	iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-	iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
+    local lan_ip
+    lan_ip="$(nvram get lan_ipaddr)"
+    # --- DNS Allow / Ping Allow / DNAT (raw PREROUTING) ---
+    iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+    iptables -t raw -D PREROUTING -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+    iptables -t raw -D PREROUTING -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+    iptables -t raw -D PREROUTING -i br0 -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT 2>/dev/null
+    # --- DNS Allow / Ping Allow (FORWARD) ---
+    iptables -D FORWARD -o wgc+ -p icmp -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+    iptables -D FORWARD -o wgc+ -p udp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+    iptables -D FORWARD -o wgc+ -p tcp --dport 53 -m set --match-set Skynet-DNSAllow dst -j ACCEPT 2>/dev/null
+    iptables -D FORWARD -o wgc+ -p icmp -m set --match-set Skynet-PingAllow dst -j ACCEPT 2>/dev/null
+    # --- DNAT ---
+    iptables -t nat -D PREROUTING -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53 2>/dev/null
+    iptables -t nat -D PREROUTING -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53 2>/dev/null
+    # --- WAN inbound ---
+    iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
+    # --- LAN bridge outbound ---
+    iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+    # --- Router own outbound ---
+    iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+    iptables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
+    ip6tables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
+    iptables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
+    ip6tables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
+    # --- WireGuard clients (wgc+) ---
+    iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
+    iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+    # --- WireGuard server (wgs+) ---
+    iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
+    iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
 }
 
 
@@ -124,25 +130,29 @@ load_IPTables() {
     local lan_ip
     lan_ip="$(nvram get lan_ipaddr)"
 
-    # Pos 1-4: ACCEPT (DNSAllow + PingAllow) — måste vara före DROP
-    iptables -t raw -I PREROUTING 1 -i br0 -p icmp   -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
+    # --- FORWARD: ACCEPT DNSAllow + PingAllow FÖRE DROP-reglerna ---
+    iptables -I FORWARD 1 -o wgc+ -p icmp     -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
+    iptables -I FORWARD 2 -o wgc+ -p udp --dport 53 -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
+    iptables -I FORWARD 3 -o wgc+ -p tcp --dport 53 -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
+    iptables -I FORWARD 4 -o wgc+ -p icmp     -m set --match-set Skynet-PingAllow dst -j ACCEPT
+
+    # --- raw PREROUTING: ACCEPT (för br0 — LAN-trafik som ej går via FORWARD) ---
+    iptables -t raw -I PREROUTING 1 -i br0 -p icmp          -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
     iptables -t raw -I PREROUTING 2 -i br0 -p udp --dport 53 -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
     iptables -t raw -I PREROUTING 3 -i br0 -p tcp --dport 53 -m set --match-set Skynet-DNSAllow  dst -j ACCEPT
-    iptables -t raw -I PREROUTING 4 -i br0 -p icmp   -m set --match-set Skynet-PingAllow dst -j ACCEPT
+    iptables -t raw -I PREROUTING 4 -i br0 -p icmp          -m set --match-set Skynet-PingAllow dst -j ACCEPT
 
-    # nat-tabellen: separat kedja, påverkar ej raw PREROUTING
+    # --- nat PREROUTING: DNAT för DNS-omdirigering ---
     iptables -t nat -I PREROUTING 1 -i br0 -p udp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
     iptables -t nat -I PREROUTING 2 -i br0 -p tcp --dport 53 ! -d "$lan_ip" -j DNAT --to-destination "$lan_ip":53
 
     if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "inbound" ]; then
-        # Pos 5-6: DROP inbound ($iface, wgc+) — matchar ej br0, men håll ordning
         iptables -t raw -I PREROUTING 5 -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
         iptables -t raw -I PREROUTING 6 -i wgc+     -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
         iptables -I FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
     fi
 
     if [ "$filtertraffic" = "all" ] || [ "$filtertraffic" = "outbound" ]; then
-        # Pos 7 (all) eller 5 (outbound only): br+ DROP — explicit, aldrig före ACCEPT
         local next_pos
         next_pos="$(iptables --line -nvL PREROUTING -t raw | awk 'NR>2{c++}END{print c+1}')"
         iptables -t raw -I PREROUTING "${next_pos:-5}" -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
