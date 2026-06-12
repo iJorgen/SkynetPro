@@ -139,19 +139,15 @@ load_IPTables() {
 load_ICMPPassthrough() {
     local ip
     for ip in $(echo "$passlist_icmp" | filter_IP_CIDR); do
-        # LAN-klienter utgående (br+)
         iptables -t raw -I PREROUTING -i br+ -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
-        # WireGuard-klienter inbound från VPN-server
         iptables -t raw -I PREROUTING -i wgc+ -p icmp \
             --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
-        # Inkommande echo-reply via WAN
         iptables -t raw -I PREROUTING -i "$iface" -p icmp \
             --icmp-type echo-reply -s "$ip" -j RETURN 2>/dev/null
-        # Routerns egna processer
         iptables -t raw -I OUTPUT -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
-        # LAN-klienter som routas ut via wgc+ (FORWARD-kedjan)
+        # FORWARD — krävs för LAN-klienter som routas via wgc+
         iptables -I FORWARD -o wgc+ -p icmp \
             --icmp-type echo-request -d "$ip" -j RETURN 2>/dev/null
     done
@@ -814,7 +810,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-12 14:48"
+build="2026-06-12 15:06"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
