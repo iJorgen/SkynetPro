@@ -80,7 +80,10 @@ passlist_dns="  8.8.8.8
 
 # Allow ICMP only to these IPs/domains. Port 53 and 443 remain blocked.
 # Supports both IP addresses and domain names.
-passlist_ping=""
+passlist_ping="8.8.8.8
+               8.8.4.4
+			   1.1.1.1
+			   1.0.0.1"
 
 
 ###############
