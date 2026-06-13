@@ -109,14 +109,12 @@ show_top() {
 	printf '%s\n' "--------------------------------------------------------------------------------------------------"
 
 	awk -v cutoff="$cutoff_key" -v yr="$cur_year" '
-		function val(s, k,   n, a, b) {       # plocka FÖRSTA  KEY=VALUE  (helt nyckel-ord)
-			# kräv whitespace eller radstart före nyckeln så "IN" ej matchar inuti "MAC=" etc.
-			if (match(s, "(^| )" k "=")) {
-				n = substr(s, RSTART + RLENGTH)
-				split(n, b, " ")
-				return b[1]
-			}
-			return ""
+		function val(s, k,   rest, b) {
+			if (!match(s, "(^| )" k "=")) return ""
+			rest = substr(s, RSTART + RLENGTH)
+			split(rest, b, " ")
+			if (b[1] ~ /=/) return ""
+			return b[1]
 		}
 		BEGIN {
 			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", M, " ")
@@ -139,7 +137,7 @@ show_top() {
 			in_if  = val($0, "IN")
 			out_if = val($0, "OUT")
 			iface  = (out_if != "") ? out_if : in_if
-			if (iface == "") iface = "-"          # ingen MAC, ingen skräp
+			if (iface == "") iface = "-"
 
 			src = val($0, "SRC"); dst = val($0, "DST")
 			proto = val($0, "PROTO")
@@ -157,18 +155,34 @@ show_top() {
 		END {
 			for (g in count) {
 				split(g, f, "|")
-				printf "%6d\t%-15s\t%-8s\t%-5s\t%-6s\t%-21s\t%-21s\n", \
+				# kolumn 1 = sorteringsnyckel, kolumn 2 = radtyp (R=rad)
+				printf "%d\tR\t%-15s\t%-8s\t%-5s\t%-6s\t%-21s\t%-21s\n", \
 					count[g], ts[g], f[1], f[2], f[3], f[4], f[5]
 			}
-			printf "TOTAL\t%d träffar inom fönstret (%d unika flöden)\n", total, length(count) > "/dev/stderr"
+			# sorteringsnyckel -1 => hamnar SIST vid sort -rn ; radtyp T=total
+			printf "%d\tT\t%d\t%d\n", -1, total, length(count)
 		}
 	' /tmp/syslog.log \
 	| sort -rn \
-	| head -20 \
-	| awk -F'\t' '{
-		printf "%-15s  %-8s  %-5s  %-6s  %-21s  %-21s  (%dx)\n", \
-			$2, $3, $4, $5, $6, $7, $1
-	}'
+	| awk -F'\t' -v lim=20 '
+		$2 == "R" {
+			if (shown < lim) {
+				printf "%-15s  %-8s  %-5s  %-6s  %-21s  %-21s  (%dx)\n", \
+					$3, $4, $5, $6, $7, $8, $1
+				shown++
+			}
+			next
+		}
+		$2 == "T" {
+			tot = $3; uniq = $4
+		}
+		END {
+			printf "%s\n" \
+				"--------------------------------------------------------------------------------------------------"
+			printf "TOTAL: %d träffar inom fönstret  (%d unika flöden, visar topp %d)\n", \
+				tot, uniq, (uniq < lim ? uniq : lim)
+		}
+	'
 }
 
 
