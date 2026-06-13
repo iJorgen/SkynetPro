@@ -99,51 +99,76 @@ show_top() {
 	hours="${1:-24}"
 	case "$hours" in (*[!0-9]*|'') hours=24 ;; esac
 
-	# Cutoff beräknas i skalet — date -d "@epoch" verifierad fungera
 	now_epoch="$(date +%s)"
 	cutoff_epoch="$(( now_epoch - hours * 3600 ))"
 	cutoff_key="$(date -d "@$cutoff_epoch" +%Y%m%d%H%M%S)"
 	cur_year="$(date +%Y)"
 
+	printf '%-15s  %-5s  %-7s  %-6s  %-21s  %-21s\n' \
+		"TID" "DIR" "PROTO" "IFACE" "SRC:PORT" "DST:PORT"
+	printf '%s\n' "-------------------------------------------------------------------------------------"
+
 	awk -v cutoff="$cutoff_key" -v yr="$cur_year" '
+		function val(s, k,   n, a, b) {       # plocka FÖRSTA KEY=VALUE
+			n = split(s, a, k "=")
+			if (n < 2) return ""
+			split(a[2], b, " ")
+			return b[1]
+		}
 		BEGIN {
 			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", M, " ")
 			for (i = 1; i <= 12; i++) mon[M[i]] = sprintf("%02d", i)
 		}
-		# Endast Skynet-loggrader (dina egna log-prefix)
 		/\[IN\]|\[OUT\]|\[WGC-IN\]|\[WGC-OUT\]|\[WGS-IN\]|\[WGS-OUT\]|\[IOT\]/ {
-			# --- Tid: $1=Mon $2=Day $3=HH:MM:SS (BSD syslog, inget år) ---
-			mm = mon[$1]
-			if (mm == "") next
+			mm = mon[$1]; if (mm == "") next
 			split($3, t, ":")
 			key = yr mm sprintf("%02d", $2) t[1] t[2] t[3]
-			if (key < cutoff) next        # äldre än fönstret
+			if (key < cutoff) next
 
-			# --- Riktningsklass utifrån prefix ---
-			dir = "?"
-			if ($0 ~ /\[IN\]|\[WGC-IN\]|\[WGS-IN\]/)  dir = "IN"
-			else if ($0 ~ /\[OUT\]|\[WGC-OUT\]|\[WGS-OUT\]/) dir = "OUT"
-			else if ($0 ~ /\[IOT\]/) dir = "IOT"
+			if      ($0 ~ /\[WGC-IN\]/)  dir = "WGCi"
+			else if ($0 ~ /\[WGC-OUT\]/) dir = "WGCo"
+			else if ($0 ~ /\[WGS-IN\]/)  dir = "WGSi"
+			else if ($0 ~ /\[WGS-OUT\]/) dir = "WGSo"
+			else if ($0 ~ /\[IOT\]/)     dir = "IOT"
+			else if ($0 ~ /\[IN\]/)      dir = "IN"
+			else                         dir = "OUT"
 
-			# --- IP: för IN vill vi SRC (angriparen), för OUT DST (destinationen) ---
-			# Plocka FÖRSTA SRC= (hoppa inre [SRC=...] ICMP-payload)
-			src = ""; dst = ""
-			n = split($0, a, "SRC=")
-			if (n >= 2) { split(a[2], b, " "); src = b[1] }
-			n = split($0, c, "DST=")
-			if (n >= 2) { split(c[2], d, " "); dst = d[1] }
+			 in_if = val($0, "IN"); out_if = val($0, "OUT")
+			iface = (out_if != "") ? out_if : in_if
 
-			ip = (dir == "OUT") ? dst : src
-			if (ip == "" || ip == "<hidden>") next
+			src = val($0, "SRC"); dst = val($0, "DST")
+			proto = val($0, "PROTO")
+			spt = val($0, "SPT"); dpt = val($0, "DPT")
 
-			count[ip]++
+			srcp = (spt != "") ? src ":" spt : src
+			dstp = (dpt != "") ? dst ":" dpt : dst
+			tstr = $1 " " $2 " " $3
+
+			# nyckel för aggregering = riktning+proto+src+dst+dpt
+			grp = dir "|" proto "|" iface "|" srcp "|" dstp
+			if (!(grp in seen)) {
+				seen[grp] = 1
+				ts[grp]   = tstr        # senaste tid (sista raden vinner om sorterad)
+			}
+			ts[grp] = tstr
+			count[grp]++
 			total++
 		}
 		END {
-			for (ip in count) printf "%6d  %s\n", count[ip], ip
-			printf "----\nTotalt: %d träffar inom fönstret\n", total > "/dev/stderr"
+			for (g in count) {
+				split(g, f, "|")
+				printf "%6d\t%-15s\t%-5s\t%-7s\t%-6s\t%-21s\t%-21s\n", \
+					count[g], ts[g], f[1], f[2], f[3], f[4], f[5]
+			}
+			printf "TOTAL\t%d träffar inom fönstret (%d unika flöden)\n", total, length(count) > "/dev/stderr"
 		}
-	' /tmp/syslog.log | sort -rn | head -10
+	' /tmp/syslog.log \
+	| sort -rn \
+	| head -10 \
+	| awk -F'\t' '{
+		printf "%-15s  %-5s  %-7s  %-6s  %-21s  %-21s  (%dx)\n", \
+			$2, $3, $4, $5, $6, $7, $1
+	}'
 }
 
 
@@ -882,7 +907,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-13 08:50"
+build="2026-06-13 09:06"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
