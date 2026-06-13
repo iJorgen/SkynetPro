@@ -102,10 +102,6 @@ unload_IPTables() {
 	iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
 	# --- Router egna processer utgående (befintlig) ---
 	iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
-	iptables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	ip6tables -D logdrop -m state --state NEW -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	iptables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
-	ip6tables -D logdrop -m state --state NEW -m limit --limit 4/sec -j LOG --log-prefix "DROP " --log-tcp-options 2>/dev/null
 	# --- WireGuard klienter (wgc+) ---
 	iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
 	iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j DROP 2>/dev/null
@@ -190,18 +186,24 @@ unload_PassthroughRules() {
 
 
 unload_LogIPTables() {
-	# --- Befintliga LOG-regler ---
-	iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
-	iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
-	iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
+	# --- WAN inbound LOG (speglar load_LogIPTables exakt) ---
+	iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 5/sec --limit-burst 10 -j LOG --log-prefix "[IN] " --log-tcp-options 2>/dev/null
+	# --- WireGuard klienter inbound LOG ---
+	iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null
+	# --- WireGuard server: onda svar tillbaka till mobilen LOG ---
+	iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null
+	# --- LAN bridge outbound LOG ---
+	iptables -t raw -D PREROUTING -i br+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
+	# --- Router OUTPUT LOG ---
+	iptables -t raw -D OUTPUT -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[OUT] " --log-tcp-options 2>/dev/null
+	# --- WireGuard klienter FORWARD outbound LOG ---
+	iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null
+	# --- WireGuard server FORWARD outbound LOG ---
+	iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null
+	# --- logdrop INVALID LOG ---
 	iptables -D logdrop -m state --state NEW -j LOG --log-prefix "[INVALID] " --log-tcp-options 2>/dev/null
-	iptables -D FORWARD -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
-	# --- WireGuard klienter LOG ---
-	iptables -t raw -D PREROUTING -i wgc+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[WGC-IN] " --log-tcp-options 2>/dev/null
-	iptables -D FORWARD -o wgc+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[WGC-OUT] " --log-tcp-options 2>/dev/null
-	# --- WireGuard server LOG ---
-	iptables -D FORWARD -i wgs+ -m set ! --match-set Skynet-Passlist dst -m set --match-set Skynet-Master dst -j LOG --log-prefix "[WGS-OUT] " --log-tcp-options 2>/dev/null
-	iptables -D FORWARD -o wgs+ -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j LOG --log-prefix "[WGS-IN] " --log-tcp-options 2>/dev/null
+	# --- IOT FORWARD LOG ---
+	iptables -D FORWARD -i br+ -m set --match-set Skynet-IOT src ! -o tun2+ -m limit --limit 10/sec --limit-burst 20 -j LOG --log-prefix "[IOT] " --log-tcp-options 2>/dev/null
 }
 
 
@@ -828,7 +830,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-13 07:46"
+build="2026-06-13 08:00"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
