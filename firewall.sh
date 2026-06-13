@@ -828,7 +828,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-13 07:38"
+build="2026-06-13 07:46"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
@@ -1090,7 +1090,7 @@ case "$command" in
 	top)
 		# Usage: firewall top [hours]
 		# Default: last 24 hours
-		local hours label logfile logfile_old logfiles result bl
+		hours="" label="" logfile="" logfile_old="" logfiles="" result="" bl=""
 
 		logfile="/tmp/syslog.log"
 		logfile_old="/tmp/syslog.log-1"
