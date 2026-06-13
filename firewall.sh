@@ -828,7 +828,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-13 07:32"
+build="2026-06-13 07:38"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
@@ -1090,9 +1090,10 @@ case "$command" in
 	top)
 		# Usage: firewall top [hours]
 		# Default: last 24 hours
-		local hours label logfile result
+		local hours label logfile logfile_old logfiles result bl
 
-		logfile="/var/log/syslog"
+		logfile="/tmp/syslog.log"
+		logfile_old="/tmp/syslog.log-1"
 
 		# Validate: must be a positive integer, otherwise default to 24
 		case "${option:-}" in
@@ -1113,6 +1114,10 @@ case "$command" in
 			printf '\n'
 			return
 		fi
+
+		# Build file list: include rotated log if it exists
+		logfiles="$logfile"
+		[ -f "$logfile_old" ] && logfiles="$logfile_old $logfiles"
 
 		# BusyBox-compatible awk:
 		#  - cur_year passed as -v variable (avoids one date(1) call per log line)
@@ -1185,7 +1190,7 @@ case "$command" in
 				print cnt[key] "\t" k[1] "\t" k[2] "\t" k[3] "\t" k[4]
 			}
 		}
-		' "$logfile" \
+		' $logfiles \
 		| sort -t$'\t' -k1 -rn \
 		| awk -F'\t' '!seen[$2]++' \
 		| head -10)
@@ -1203,7 +1208,7 @@ case "$command" in
 
 		# Print each row with optional blocklist lookup
 		echo "$result" | while IFS=$'\t' read -r count ip dir iface proto; do
-			local bl="unknown"
+			bl="unknown"
 			if [ -f "${dir_system}/lookup.csv" ]; then
 				while IFS=',' read -r setname comment; do
 					[ -z "$setname" ] && continue
@@ -1220,7 +1225,6 @@ case "$command" in
 
 		printf '\n'
 	;;
-
 
 	help)
 		header "Commands"
