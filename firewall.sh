@@ -95,6 +95,58 @@ passlist_icmp="     8.8.8.8
 #- Functions -#
 ###############
 
+show_top() {
+	hours="${1:-24}"
+	case "$hours" in (*[!0-9]*|'') hours=24 ;; esac
+
+	# Cutoff beräknas i skalet — date -d "@epoch" verifierad fungera
+	now_epoch="$(date +%s)"
+	cutoff_epoch="$(( now_epoch - hours * 3600 ))"
+	cutoff_key="$(date -d "@$cutoff_epoch" +%Y%m%d%H%M%S)"
+	cur_year="$(date +%Y)"
+
+	awk -v cutoff="$cutoff_key" -v yr="$cur_year" '
+		BEGIN {
+			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", M, " ")
+			for (i = 1; i <= 12; i++) mon[M[i]] = sprintf("%02d", i)
+		}
+		# Endast Skynet-loggrader (dina egna log-prefix)
+		/\[IN\]|\[OUT\]|\[WGC-IN\]|\[WGC-OUT\]|\[WGS-IN\]|\[WGS-OUT\]|\[IOT\]/ {
+			# --- Tid: $1=Mon $2=Day $3=HH:MM:SS (BSD syslog, inget år) ---
+			mm = mon[$1]
+			if (mm == "") next
+			split($3, t, ":")
+			key = yr mm sprintf("%02d", $2) t[1] t[2] t[3]
+			if (key < cutoff) next        # äldre än fönstret
+
+			# --- Riktningsklass utifrån prefix ---
+			dir = "?"
+			if ($0 ~ /\[IN\]|\[WGC-IN\]|\[WGS-IN\]/)  dir = "IN"
+			else if ($0 ~ /\[OUT\]|\[WGC-OUT\]|\[WGS-OUT\]/) dir = "OUT"
+			else if ($0 ~ /\[IOT\]/) dir = "IOT"
+
+			# --- IP: för IN vill vi SRC (angriparen), för OUT DST (destinationen) ---
+			# Plocka FÖRSTA SRC= (hoppa inre [SRC=...] ICMP-payload)
+			src = ""; dst = ""
+			n = split($0, a, "SRC=")
+			if (n >= 2) { split(a[2], b, " "); src = b[1] }
+			n = split($0, c, "DST=")
+			if (n >= 2) { split(c[2], d, " "); dst = d[1] }
+
+			ip = (dir == "OUT") ? dst : src
+			if (ip == "" || ip == "<hidden>") next
+
+			count[ip]++
+			total++
+		}
+		END {
+			for (ip in count) printf "%6d  %s\n", count[ip], ip
+			printf "----\nTotalt: %d träffar inom fönstret\n", total > "/dev/stderr"
+		}
+	' /tmp/syslog.log | sort -rn | head -10
+}
+
+
 unload_IPTables() {
 	# --- WAN inbound (befintlig) ---
 	iptables -t raw -D PREROUTING -i "$iface" -m set ! --match-set Skynet-Passlist src -m set --match-set Skynet-Master src -j DROP 2>/dev/null
@@ -830,7 +882,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-13 08:00"
+build="2026-06-13 08:50"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
@@ -1088,145 +1140,11 @@ case "$command" in
 		footer "" "Total: $(formatted_Number $total)"
 	;;
 
-
+	
 	top)
-		# Usage: firewall top [hours]
-		# Default: last 24 hours
-		hours="" label="" logfile="" logfile_old="" logfiles="" result="" bl=""
-
-		logfile="/tmp/syslog.log"
-		logfile_old="/tmp/syslog.log-1"
-
-		# Validate: must be a positive integer, otherwise default to 24
-		case "${option:-}" in
-			''|*[!0-9]*) hours=24 ;;
-			*)           hours="$option" ;;
-		esac
-
-		if [ "$hours" -eq 1 ]; then
-			label="last hour"
-		else
-			label="last ${hours} hours"
-		fi
-
-		printf '\n [i] Top blocked IPs — %s\n\n' "$label"
-
-		if [ ! -f "$logfile" ]; then
-			echo " [!] Log file not found: $logfile"
-			printf '\n'
-			return
-		fi
-
-		# Build file list: include rotated log if it exists
-		logfiles="$logfile"
-		[ -f "$logfile_old" ] && logfiles="$logfile_old $logfiles"
-
-		# BusyBox-compatible awk:
-		#  - cur_year passed as -v variable (avoids one date(1) call per log line)
-		#  - mktime() is available in BusyBox awk (confirmed in upstream source)
-		#  - No three-argument match() — [DIR] tag extracted with sub()
-		#  - SRC= IN= OUT= PROTO= extracted with substr(), no GNU extensions needed
-		result=$(awk \
-			-v hours="$hours" \
-			-v cur_year="$(date +%Y)" \
-		'
-		BEGIN {
-			cutoff = systime() - (hours * 3600)
-
-			# Build month-name to number map
-			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", mn, " ")
-			for (i = 1; i <= 12; i++) mmap[mn[i]] = i
-		}
-
-		# Match only Skynet LOG lines
-		/\[(IN|OUT|WGC-IN|WGC-OUT|WGS-IN|WGS-OUT)\]/ {
-
-			# Syslog timestamp: $1=Month $2=Day $3=Time
-			mm = mmap[$1]
-			if (mm == "") next
-
-			n = split($3, t, ":")
-			if (n != 3) next
-
-			# Build mktime string using the pre-computed year
-			ts = mktime(cur_year " " mm " " $2 " " t[1] " " t[2] " " t[3])
-			if (ts < cutoff) next
-
-			# Extract [DIR] tag — strip everything before "[" and after "]"
-			dir = $0
-			sub(/.*\[/, "", dir)
-			sub(/\].*/, "", dir)
-
-			# Validate direction label
-			if (dir != "IN"     && dir != "OUT"     && \
-			    dir != "WGC-IN" && dir != "WGC-OUT" && \
-			    dir != "WGS-IN" && dir != "WGS-OUT") next
-
-			# Extract fields using substr() — portable across all awk variants
-			ip = ""; iface = ""; proto = "-"
-			for (i = 1; i <= NF; i++) {
-				f = $i
-				if (substr(f, 1, 4) == "SRC=")   ip    = substr(f, 5)
-				if (substr(f, 1, 3) == "IN=")    iface = substr(f, 4)
-				if (substr(f, 1, 6) == "PROTO=") proto = substr(f, 7)
-			}
-
-			# Fallback: use OUT= interface if IN= is empty (outbound traffic)
-			if (iface == "") {
-				for (i = 1; i <= NF; i++) {
-					if (substr($i, 1, 4) == "OUT=") iface = substr($i, 5)
-				}
-			}
-
-			if (ip    == "") next
-			if (iface == "") iface = "-"
-
-			# Composite key: ip + direction + interface + protocol
-			key = ip SUBSEP dir SUBSEP iface SUBSEP proto
-			cnt[key]++
-		}
-
-		END {
-			for (key in cnt) {
-				split(key, k, SUBSEP)
-				print cnt[key] "\t" k[1] "\t" k[2] "\t" k[3] "\t" k[4]
-			}
-		}
-		' $logfiles \
-		| sort -t$'\t' -k1 -rn \
-		| awk -F'\t' '!seen[$2]++' \
-		| head -10)
-
-		if [ -z "$result" ]; then
-			printf ' [i] No blocked IPs found in %s\n\n' "$label"
-			return
-		fi
-
-		# Print table header
-		printf ' %-8s  %-18s  %-10s  %-10s  %-6s  %s\n' \
-			"Hits" "IP" "Direction" "Interface" "Proto" "Blocklist"
-		printf ' %s\n' \
-			"------------------------------------------------------------------------"
-
-		# Print each row with optional blocklist lookup
-		echo "$result" | while IFS=$'\t' read -r count ip dir iface proto; do
-			bl="unknown"
-			if [ -f "${dir_system}/lookup.csv" ]; then
-				while IFS=',' read -r setname comment; do
-					[ -z "$setname" ] && continue
-					if ipset -q test "$setname" "$ip" 2>/dev/null; then
-						bl="$comment"
-						break
-					fi
-				done < "${dir_system}/lookup.csv"
-			fi
-			printf ' %-8s  %-18s  %-10s  %-10s  %-6s  %s\n' \
-				"$(formatted_Number "$count")" \
-				"$ip" "$dir" "$iface" "$proto" "$bl"
-		done
-
-		printf '\n'
+		show_top
 	;;
+
 
 	help)
 		header "Commands"
