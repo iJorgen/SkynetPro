@@ -106,7 +106,7 @@ show_top() {
 	cutoff_key="$(date -d "@$cutoff_epoch" +%Y%m%d%H%M%S)"
 	cur_year="$(date +%Y)"
 
-	awk -v cutoff="$cutoff_key" -v yr="$cur_year" -v lim=20 '
+	awk -v cutoff="$cutoff_key" -v yr="$cur_year" -v lim=16 '
 		function val(s, k,   rest, b) {
 			if (!match(s, "(^| )" k "=")) return ""
 			rest = substr(s, RSTART + RLENGTH)
@@ -169,7 +169,7 @@ show_top() {
 		}
 	' /tmp/syslog.log \
 	| sort -t"$(printf '\t')" -k1,1n -k2,2nr \
-	| awk -F'\t' -v lim=20 '
+	| awk -F'\t' -v lim=16 '
 		function hdr(s) {
 			if (s == 1)      title = "INBOUND   (blocked traffic toward router/LAN)"
 			else if (s == 2) title = "OUTBOUND  (blocked traffic from LAN/router)"
@@ -947,7 +947,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-14 11:06"
+build="2026-06-14 11:26"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
