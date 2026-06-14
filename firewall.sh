@@ -812,15 +812,16 @@ download_Set() {
 		echo "$setname,$comment" >> "$dir_temp/lookup.csv"
 
 		if ! ipset -n list "$setname" >/dev/null 2>&1; then
-			case "$url" in
-				*bitwire*)   hashsize=262144 ;;
-				*hagezi*)    hashsize=131072  ;;
-				*abuseipdb*) hashsize=65536  ;;
-				*ipsum*)     hashsize=32768  ;;
-				*)           hashsize=16384   ;;
-			esac
-			ipset create "$setname" hash:net hashsize "$hashsize" maxelem 524288 comment
-			ipset add Skynet-Master "$setname" comment "$comment"
+		    case "$url" in
+		        *hagezi*/ips/doh*)  hashsize=4096   ;;
+		        *hagezi*/ips/tif*)  hashsize=131072  ;;
+		        *bitwire*)          hashsize=262144  ;;
+		        *abuseipdb*)        hashsize=65536   ;;
+		        *ipsum*)            hashsize=32768   ;;
+		        *)                  hashsize=16384   ;;
+		    esac
+		    ipset create "$setname" hash:net hashsize "$hashsize" maxelem 524288 comment
+		    ipset add Skynet-Master "$setname" comment "$comment"
 		fi
 
 		if [ $((updatecount % update_cycles)) -ne 0 ]; then
