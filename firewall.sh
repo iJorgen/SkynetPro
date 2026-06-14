@@ -947,7 +947,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-14 10:26"
+build="2026-06-14 11:06"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
@@ -1207,7 +1207,7 @@ case "$command" in
 
 	
 	top)
-		show_top
+		show_top "$option"
 	;;
 
 
