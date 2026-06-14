@@ -88,7 +88,9 @@ passlist_icmp="     8.8.8.8
                     94.140.14.14
                     94.140.15.15
                     94.140.14.15
-                    94.140.15.16"
+                    94.140.15.16
+                    208.67.220.220
+                    208.67.222.222"
 
 
 ###############
@@ -104,11 +106,7 @@ show_top() {
 	cutoff_key="$(date -d "@$cutoff_epoch" +%Y%m%d%H%M%S)"
 	cur_year="$(date +%Y)"
 
-	printf '%-15s  %-8s  %-5s  %-6s  %-21s  %-21s  %s\n' \
-		"TID" "DIR" "PROTO" "IFACE" "SRC:PORT" "DST:PORT" "ANTAL"
-	printf '%s\n' "--------------------------------------------------------------------------------------------------"
-
-	awk -v cutoff="$cutoff_key" -v yr="$cur_year" '
+	awk -v cutoff="$cutoff_key" -v yr="$cur_year" -v lim=20 '
 		function val(s, k,   rest, b) {
 			if (!match(s, "(^| )" k "=")) return ""
 			rest = substr(s, RSTART + RLENGTH)
@@ -120,67 +118,95 @@ show_top() {
 			split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", M, " ")
 			for (i = 1; i <= 12; i++) mon[M[i]] = sprintf("%02d", i)
 		}
-		/\[IN\]|\[OUT\]|\[WGC-IN\]|\[WGC-OUT\]|\[WGS-IN\]|\[WGS-OUT\]|\[IOT\]/ {
+		/\[IN\]|\[OUT\]|\[WGC-IN\]|\[WGC-OUT\]|\[WGS-IN\]|\[WGS-OUT\]|\[IOT\]|\[INVALID\]/ {
 			mm = mon[$1]; if (mm == "") next
 			split($3, t, ":")
 			key = yr mm sprintf("%02d", $2) t[1] t[2] t[3]
 			if (key < cutoff) next
 
-			if      ($0 ~ /\[WGC-IN\]/)  dir = "WGC-in"
-			else if ($0 ~ /\[WGC-OUT\]/) dir = "WGC-out"
-			else if ($0 ~ /\[WGS-IN\]/)  dir = "WGS-in"
-			else if ($0 ~ /\[WGS-OUT\]/) dir = "WGS-out"
-			else if ($0 ~ /\[IOT\]/)     dir = "IOT"
-			else if ($0 ~ /\[IN\]/)      dir = "IN"
-			else                         dir = "OUT"
+			# sec = section number (sort order), dir = label, inbound = direction
+			if      ($0 ~ /\[WGC-IN\]/)  { sec = 1; dir = "WGC-in";  inbound = 1 }
+			else if ($0 ~ /\[WGS-IN\]/)  { sec = 1; dir = "WGS-in";  inbound = 1 }
+			else if ($0 ~ /\[IN\]/)      { sec = 1; dir = "IN";      inbound = 1 }
+			else if ($0 ~ /\[WGC-OUT\]/) { sec = 2; dir = "WGC-out"; inbound = 0 }
+			else if ($0 ~ /\[WGS-OUT\]/) { sec = 2; dir = "WGS-out"; inbound = 0 }
+			else if ($0 ~ /\[OUT\]/)     { sec = 2; dir = "OUT";     inbound = 0 }
+			else if ($0 ~ /\[IOT\]/)     { sec = 3; dir = "IOT";     inbound = 0 }
+			else                         { sec = 4; dir = "INVALID"; inbound = 1 }
 
 			in_if  = val($0, "IN")
 			out_if = val($0, "OUT")
-			iface  = (out_if != "") ? out_if : in_if
+			# direction-aware: inbound shows ingress iface, outbound shows egress iface
+			if (inbound) iface = (in_if != "") ? in_if : out_if
+			else         iface = (out_if != "") ? out_if : in_if
 			if (iface == "") iface = "-"
 
-			src = val($0, "SRC"); dst = val($0, "DST")
+			src   = val($0, "SRC"); dst = val($0, "DST")
 			proto = val($0, "PROTO")
-			spt = val($0, "SPT"); dpt = val($0, "DPT")
+			spt   = val($0, "SPT"); dpt = val($0, "DPT")
+			if (proto == "") proto = "-"
 
 			srcp = (spt != "") ? src ":" spt : src
 			dstp = (dpt != "") ? dst ":" dpt : dst
 			tstr = $1 " " $2 " " $3
 
-			grp = dir "|" proto "|" iface "|" srcp "|" dstp
-			ts[grp] = tstr
+			# group key includes sec so sections never mix
+			grp = sec "|" dir "|" proto "|" iface "|" srcp "|" dstp
+			ts[grp]    = tstr
 			count[grp]++
-			total++
+			sectot[sec]++
 		}
 		END {
+			# R rows: sort key = sec (asc, -k1) + count (desc, -k2)
 			for (g in count) {
-				split(g, f, "|")
-				# kolumn 1 = sorteringsnyckel, kolumn 2 = radtyp (R=rad)
-				printf "%d\tR\t%-15s\t%-8s\t%-5s\t%-6s\t%-21s\t%-21s\n", \
-					count[g], ts[g], f[1], f[2], f[3], f[4], f[5]
+				n = split(g, f, "|")
+				printf "%d\t%d\tR\t%-15s\t%-8s\t%-5s\t%-7s\t%-21s\t%-21s\n", \
+					f[1], count[g], ts[g], f[2], f[3], f[4], f[5], f[6]
 			}
-			# sorteringsnyckel -1 => hamnar SIST vid sort -rn ; radtyp T=total
-			printf "%d\tT\t%d\t%d\n", -1, total, length(count)
+			# T rows: one per section, count = -1 so totals sort last within section
+			for (s in sectot)
+				printf "%d\t%d\tT\t%d\n", s, -1, sectot[s]
 		}
 	' /tmp/syslog.log \
-	| sort -rn \
+	| sort -t"$(printf '\t')" -k1,1n -k2,2nr \
 	| awk -F'\t' -v lim=20 '
-		$2 == "R" {
+		function hdr(s) {
+			if (s == 1)      title = "INBOUND   (blocked traffic toward router/LAN)"
+			else if (s == 2) title = "OUTBOUND  (blocked traffic from LAN/router)"
+			else if (s == 3) title = "IOT       (LAN device bypassing VPN tunnel)"
+			else             title = "INVALID   (state NEW, directionless drop)"
+			printf "\n=== %s ===\n", title
+			printf "%-15s  %-8s  %-5s  %-7s  %-21s  %-21s  %s\n", \
+				"TIME", "DIR", "PROTO", "IFACE", "SRC:PORT", "DST:PORT", "COUNT"
+			printf "%s\n", "------------------------------------------------------------------------------------------------------"
+		}
+		{ s = $1 }
+		s != cur {            # new section
+			if (cur != "") {  # flush previous section total
+				printf "%s\n", "------------------------------------------------------------------------------------------------------"
+				printf "Subtotal: %d hits  (%d unique flows, showing top %d)\n", tot[cur], uniq[cur], (uniq[cur] < lim ? uniq[cur] : lim)
+			}
+			hdr(s); cur = s; shown = 0
+		}
+		$3 == "R" {
+			uniq[s]++
 			if (shown < lim) {
-				printf "%-15s  %-8s  %-5s  %-6s  %-21s  %-21s  (%dx)\n", \
-					$3, $4, $5, $6, $7, $8, $1
+				printf "%-15s  %-8s  %-5s  %-7s  %-21s  %-21s  (%dx)\n", \
+					$4, $5, $6, $7, $8, $9, $2
 				shown++
 			}
 			next
 		}
-		$2 == "T" {
-			tot = $3; uniq = $4
-		}
+		$3 == "T" { tot[s] = $4 }
 		END {
-			printf "%s\n" \
-				"--------------------------------------------------------------------------------------------------"
-			printf "TOTAL: %d träffar inom fönstret  (%d unika flöden, visar topp %d)\n", \
-				tot, uniq, (uniq < lim ? uniq : lim)
+			if (cur != "") {
+				printf "%s\n", "------------------------------------------------------------------------------------------------------"
+				printf "Subtotal: %d hits  (%d unique flows, showing top %d)\n", tot[cur], uniq[cur], (uniq[cur] < lim ? uniq[cur] : lim)
+			}
+			grand = 0
+			for (s in tot) grand += tot[s]
+			printf "\n%s\n", "======================================================================================================"
+			printf "TOTAL: %d hits within the window\n", grand
 		}
 	'
 }
@@ -921,7 +947,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-13 09:18"
+build="2026-06-14 10:26"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
