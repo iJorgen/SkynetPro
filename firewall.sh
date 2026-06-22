@@ -166,7 +166,7 @@ show_top() {
 			for (s in sectot)
 				printf "%d\t%d\tT\t%d\n", s, -1, sectot[s]
 		}
-	' /tmp/syslog.log \
+	' /tmp/syslog.log-1 /tmp/syslog.log \
 	| sort -t"$(printf '\t')" -k1,1n -k2,2nr \
 	| awk -F'\t' -v lim=16 '
 		function hdr(s) {
