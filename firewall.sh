@@ -947,7 +947,7 @@ throttle=0
 updatecount=0
 iotblocked="disabled"
 version="3.8.6"
-build="2026-06-22 11:06"
+build="2026-06-24 21:36"
 useragent="$(curl -V | grep -Eo '^curl.+)') Skynet-Lite/$version https://github.com/wbartels/IPSet_ASUS_Lite"
 lockfile="/var/lock/skynet.lock"
 
@@ -1028,44 +1028,44 @@ domain=$(echo "$command" | is_Domain) && command="domain"
 ip=$(echo "$command" | is_IP) && command="ip"
 case "$command" in
 	reset)
-		header "Reset"
-		log_Skynet "[i] Install"
-		rm -f "$dir_cache/"* "$dir_debug/"* "$dir_etag/"* "$dir_filtered/"*
-		rm -f "$dir_system/"* "$dir_temp/"* "$dir_update/"*
-		true > "$dir_skynet/update.log"
-		touch "$dir_system/installtime"
-		if [ "$0" != "/jffs/scripts/firewall" ]; then
-			mv -f "$0" "/jffs/scripts/firewall"
-			log_Skynet "[!] Skynet Lite moved to /jffs/scripts/firewall"
-		fi
-		if [ ! -f "/jffs/scripts/firewall-start" ]; then
-			echo "#!/bin/sh
-			/jffs/scripts/firewall" | tr -d '\t' > "/jffs/scripts/firewall-start"
-			chmod 755 "/jffs/scripts/firewall-start"
-		elif [ -f "/jffs/scripts/firewall-start" ] && ! grep -q "/jffs/scripts/firewall" "/jffs/scripts/firewall-start"; then
-			chmod 755 "/jffs/scripts/firewall-start"
-			echo "/jffs/scripts/firewall" >> "/jffs/scripts/firewall-start"
-		fi
-		unload_IPTables
-		unload_LogIPTables
-		unload_IPSets
-		echo 'create Skynet-Passlist hash:net comment
-			create Skynet-Master list:set size 64 comment counters
-			create Skynet-Blocklist hash:net comment
-			create Skynet-Domain hash:net comment
-			add Skynet-Master Skynet-Blocklist comment "blocklist_ip"
-			add Skynet-Master Skynet-Domain comment "blocklist_domain"' | tr -d '\t' | ipset restore -!
-		load_IPTables
-		load_LogIPTables
-		lookup_Comment_Init
-		load_Passlist
-		load_Blocklist
-		load_Domain
-		download_Set
-		cru d Skynet_update
-		cru a Skynet_update "12,27,42,57 * * * * nice -n 19 /jffs/scripts/firewall update cru"
-		update_Counter "$dir_system/updatecount" >/dev/null
-		footer
+	    header "Reset"
+	    log_Skynet "[i] Install"
+	    rm -f "$dir_cache/"* "$dir_debug/"* "$dir_etag/"* "$dir_filtered/"*
+	    rm -f "$dir_system/"* "$dir_temp/"* "$dir_update/"*
+	    true > "$dir_skynet/update.log"
+	    touch "$dir_system/installtime"
+	    if [ "$0" != "/jffs/scripts/firewall" ]; then
+	        mv -f "$0" "/jffs/scripts/firewall"
+	        log_Skynet "[!] Skynet Lite moved to /jffs/scripts/firewall"
+	    fi
+	    if [ ! -f "/jffs/scripts/wan-start" ]; then
+	        echo "#!/bin/sh
+	        /jffs/scripts/firewall" | tr -d '\t' > "/jffs/scripts/wan-start"
+	        chmod 755 "/jffs/scripts/wan-start"
+	    elif [ -f "/jffs/scripts/wan-start" ] && ! grep -q "/jffs/scripts/firewall" "/jffs/scripts/wan-start"; then
+	        chmod 755 "/jffs/scripts/wan-start"
+	        echo "/jffs/scripts/firewall" >> "/jffs/scripts/wan-start"
+	    fi
+	    unload_IPTables
+	    unload_LogIPTables
+	    unload_IPSets
+	    echo 'create Skynet-Passlist hash:net comment
+	        create Skynet-Master list:set size 64 comment counters
+	        create Skynet-Blocklist hash:net comment
+	        create Skynet-Domain hash:net comment
+	        add Skynet-Master Skynet-Blocklist comment "blocklist_ip"
+	        add Skynet-Master Skynet-Domain comment "blocklist_domain"' | tr -d '\t' | ipset restore -!
+	    load_IPTables
+	    load_LogIPTables
+	    lookup_Comment_Init
+	    load_Passlist
+	    load_Blocklist
+	    load_Domain
+	    download_Set
+	    cru d Skynet_update
+	    cru a Skynet_update "12,27,42,57 * * * * nice -n 19 /jffs/scripts/firewall update cru"
+	    update_Counter "$dir_system/updatecount" >/dev/null
+	    footer
 	;;
 
 
@@ -1081,21 +1081,21 @@ case "$command" in
 
 
 	uninstall)
-		header "Uninstall"
-		log_Skynet "[*] Uninstall Skynet Lite..."
-		cru d Skynet_update
-		if [ -f "/jffs/scripts/firewall-start" ]; then
-			chmod 755 "/jffs/scripts/firewall-start"
-			config=$(grep -v "/jffs/scripts/firewall" "/jffs/scripts/firewall-start")
-			echo "$config" > "/jffs/scripts/firewall-start"
-		fi
-		unload_IPTables
-		unload_LogIPTables
-		unload_IPSets
-		rm -fr "$dir_skynet"
-		rm -f "$lockfile" "$0"
-		echo " [i] Skynet Lite has been successfully uninstalled"
-		footer "empty"; exit 0
+	    header "Uninstall"
+	    log_Skynet "[*] Uninstall Skynet Lite..."
+	    cru d Skynet_update
+	    if [ -f "/jffs/scripts/wan-start" ]; then
+	        chmod 755 "/jffs/scripts/wan-start"
+	        config=$(grep -v "/jffs/scripts/firewall" "/jffs/scripts/wan-start")
+	        echo "$config" > "/jffs/scripts/wan-start"
+	    fi
+	    unload_IPTables
+	    unload_LogIPTables
+	    unload_IPSets
+	    rm -fr "$dir_skynet"
+	    rm -f "$lockfile" "$0"
+	    echo " [i] Skynet Lite has been successfully uninstalled"
+	    footer "empty"; exit 0
 	;;
 
 
