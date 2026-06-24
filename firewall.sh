@@ -1042,7 +1042,7 @@ case "$command" in
 	        echo "#!/bin/sh
 	        /jffs/scripts/firewall" | tr -d '\t' > "/jffs/scripts/wan-start"
 	        chmod 755 "/jffs/scripts/wan-start"
-	    elif [ -f "/jffs/scripts/wan-start" ] && ! grep -q "/jffs/scripts/firewall" "/jffs/scripts/wan-start"; then
+	    elif [ -f "/jffs/scripts/wan-start" ] && ! grep -qE "^[^#]*/jffs/scripts/firewall" "/jffs/scripts/wan-start"; then
 	        chmod 755 "/jffs/scripts/wan-start"
 	        echo "/jffs/scripts/firewall" >> "/jffs/scripts/wan-start"
 	    fi
@@ -1086,7 +1086,7 @@ case "$command" in
 	    cru d Skynet_update
 	    if [ -f "/jffs/scripts/wan-start" ]; then
 	        chmod 755 "/jffs/scripts/wan-start"
-	        config=$(grep -v "/jffs/scripts/firewall" "/jffs/scripts/wan-start")
+	        config=$(grep -v "^[^#]*/jffs/scripts/firewall" "/jffs/scripts/wan-start")
 	        echo "$config" > "/jffs/scripts/wan-start"
 	    fi
 	    unload_IPTables
