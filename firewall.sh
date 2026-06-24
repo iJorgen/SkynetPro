@@ -1040,11 +1040,11 @@ case "$command" in
 	    fi
 	    if [ ! -f "/jffs/scripts/wan-start" ]; then
 	        echo "#!/bin/sh
-	        /jffs/scripts/firewall" | tr -d '\t' > "/jffs/scripts/wan-start"
+	        /jffs/scripts/firewall reset" | tr -d '\t' > "/jffs/scripts/wan-start"
 	        chmod 755 "/jffs/scripts/wan-start"
 	    elif [ -f "/jffs/scripts/wan-start" ] && ! grep -qE "^[^#]*/jffs/scripts/firewall" "/jffs/scripts/wan-start"; then
 	        chmod 755 "/jffs/scripts/wan-start"
-	        echo "/jffs/scripts/firewall" >> "/jffs/scripts/wan-start"
+	        echo "/jffs/scripts/firewall reset" >> "/jffs/scripts/wan-start"
 	    fi
 	    unload_IPTables
 	    unload_LogIPTables
